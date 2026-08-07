@@ -1,8 +1,8 @@
 ---
 id: T-001
 title: Monorepo scaffold + core spine contracts (packages/core)
-stage: build
-owner_agent: designer
+stage: test
+owner_agent: builder
 status: pending
 depends_on: []
 file_ownership:
@@ -50,3 +50,4 @@ A buildable TypeScript monorepo exists with workspace tooling (pnpm workspaces, 
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 2026-08-07 · designer · design doc published (docs/design/T-001.md); stage design → build; note: npm workspaces per orchestration constraint, pnpm-workspace.yaml intentionally not created (design D1)
 2026-08-07 · designer · idempotent verification pass: design confirmed complete vs specs/00 + ADR-001/002; D1 and §9 updated to cite ADR-003 (deviation resolved, none open)
+2026-08-07 · builder · built per design: root scaffold (npm install run once; package-lock.json committed as install artifact), packages/core contracts + trivial smoke spec; tsc --noEmit green, "npx vitest run packages/core" green (vitest 3.2.7 honors workspace file with deprecation notice); deviation note: core package.json marker named "@deal-copilot/core" — npm rejects bare "@core" as a package name; @core alias maps unchanged; stage build → test
