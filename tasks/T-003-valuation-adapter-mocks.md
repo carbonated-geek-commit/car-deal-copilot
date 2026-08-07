@@ -1,7 +1,7 @@
 ---
 id: T-003
 title: Valuation adapters — KBB-mock + Manheim-mock behind one interface
-stage: build
+stage: test
 owner_agent: designer
 status: pending
 depends_on: [T-001]
@@ -39,3 +39,4 @@ A `packages/adapters/valuation` package exists with two mock adapter implementat
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 2026-08-07 12:33 · designer · design complete → docs/design/T-003.md; stage design → build; no blockers (interpretive calls D1–D9 logged in design doc §0)
+2026-08-07 13:05 · builder · build complete → packages/adapters/valuation (mocks + blend + fixtures, tsc clean); stage build → test; note: shared mock logic lives in internal src/mock-adapter.ts (addition to design §1 file list, internal-only)
