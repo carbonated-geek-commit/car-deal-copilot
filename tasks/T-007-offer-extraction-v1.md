@@ -1,7 +1,7 @@
 ---
 id: T-007
 title: Offer extraction v1 — rule-based transcript/text → parsed Offer
-stage: design
+stage: build
 owner_agent: designer
 status: pending
 depends_on: [T-001]
@@ -37,3 +37,4 @@ A `packages/offer-extraction` package exists containing a rule-based v1 extracto
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+2026-08-07 · designer · design doc published (docs/design/T-007.md); stage design → build; deviation flagged for chief (design D1): AC-2+AC-4 partial offers require core `Offer.sale_price` to become optional — needs chief ADR + T-001-ownership amendment before T-007 build merges; fallback documented in design
