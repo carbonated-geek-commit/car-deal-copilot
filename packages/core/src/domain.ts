@@ -120,7 +120,12 @@ export interface OfferFee {
 }
 
 export interface Offer {
-  sale_price: MoneyCents;
+  /**
+   * ADR-005: optional — absent means *the dealer did not state a price*
+   * (a first-class, common state, not an error). Downstream consumers must
+   * treat flags whose inputs are missing as unevaluable, never default to zero.
+   */
+  sale_price?: MoneyCents;
   fees: OfferFee[];
   /** Annual percentage rate, e.g. 6.9 — absent on cash deals. */
   apr?: number;
