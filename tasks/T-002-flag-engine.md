@@ -1,7 +1,7 @@
 ---
 id: T-002
 title: Flag engine — pure function of Offer + qualified-rate + walk-away
-stage: design
+stage: build
 owner_agent: designer
 status: pending
 depends_on: [T-001]
@@ -38,3 +38,4 @@ A `packages/flag-engine` package exists containing a pure, provider-agnostic fun
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+2026-08-07 · designer · design doc published (docs/design/T-002.md); stage design → build; naming wrinkle already resolved by ADR-002 (payment_packing); thresholds designed as required injectable config with no defaults (design D1); over_walkaway total read as sale_price + Σ fees (design D2) — all interpretive calls logged in design §0, none blocking
