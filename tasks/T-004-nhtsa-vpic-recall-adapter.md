@@ -1,7 +1,7 @@
 ---
 id: T-004
 title: Vehicle-data adapter — NHTSA vPIC + Recall API (live-approved, fixture-tested)
-stage: build
+stage: test
 owner_agent: designer
 status: pending
 depends_on: [T-001]
@@ -38,3 +38,4 @@ A `packages/adapters/nhtsa` package exists implementing the vehicle-data adapter
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 2026-08-07 · designer · design doc published (docs/design/T-004.md); interpretive calls D1–D9 logged; stage → build
+2026-08-07 · builder · adapter implemented per design (packages/adapters/nhtsa: zero-dep injectable-fetch client, D2 two-step recalls, toVehicleData helper, recorded fixtures); tsc clean; stage → test
