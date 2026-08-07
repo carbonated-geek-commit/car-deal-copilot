@@ -19,25 +19,16 @@ import { findTermMonths } from './rules/term.js';
 import { findSalePrice } from './rules/price.js';
 
 /**
- * Partial-offer shape (design §0 D1 FALLBACK — read before changing).
+ * Partial-offer shape (design §0 D1, resolved by ADR-005).
  *
- * AC-4 requires partial offers (a monthly-only SMS still yields an offer);
- * `@core`'s `Offer.sale_price` is currently REQUIRED, and the chief ADR
- * that would make it optional (design D1 primary resolution) has not
- * landed as of this build. Per the design's documented fallback, this type
- * is DERIVED from the canonical `Offer` via `Omit` — a projection of the
- * single source of truth, not a parallel definition (ADR-001 honored: no
- * offer field is re-declared here; `Offer['sale_price']` keeps even the
- * scalar type inherited).
- *
- * If/when the chief lands the core amendment (`sale_price?: MoneyCents`),
- * this alias becomes structurally identical to `Offer` and can collapse to
- * `export type ExtractedOffer = Offer;` — the one-type-name isolation the
- * design promised (§0 D1).
+ * ADR-005 made `@core` `Offer.sale_price` optional (absent = the dealer did
+ * not state a price), so the partial projection is representable in the spine
+ * directly and the design's documented fallback (`Omit`-derived alias)
+ * collapses to the canonical type — the one-type-name isolation the design
+ * promised (§0 D1). Kept as a named alias so the public API reads as the
+ * design specifies; it IS the `@core` `Offer` (ADR-001: no parallel type).
  */
-export type ExtractedOffer = Omit<Offer, 'sale_price'> & {
-  sale_price?: Offer['sale_price'];
-};
+export type ExtractedOffer = Offer;
 
 /**
  * Channel-agnostic extraction input (AC-3). One entry point for all three

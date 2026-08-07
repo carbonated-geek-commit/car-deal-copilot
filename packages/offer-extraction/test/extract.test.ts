@@ -303,8 +303,9 @@ describe('determinism & freshness (§4.3)', () => {
 // Type-level: spine referenced, never redefined (AC-2, D1 fallback, D3)
 // ---------------------------------------------------------------------------
 
-describe('type-level — no parallel offer type (AC-2)', () => {
-  it('ExtractedOffer is a projection of the @core Offer: same keys, same field types', () => {
+describe('type-level — no parallel offer type (AC-2, D1 resolved by ADR-005)', () => {
+  it('ExtractedOffer IS the @core Offer (ADR-005 collapse): identical type, identical fields', () => {
+    expectTypeOf<ExtractedOffer>().toEqualTypeOf<Offer>();
     expectTypeOf<keyof ExtractedOffer>().toEqualTypeOf<keyof Offer>();
     expectTypeOf<ExtractedOffer['fees']>().toEqualTypeOf<OfferFee[]>();
     expectTypeOf<ExtractedOffer['flags']>().toEqualTypeOf<OfferFlag[]>();
@@ -314,12 +315,9 @@ describe('type-level — no parallel offer type (AC-2)', () => {
     expectTypeOf<ExtractedOffer['sale_price']>().toEqualTypeOf<MoneyCents | undefined>();
   });
 
-  it('a canonical Offer is accepted where ExtractedOffer is expected, and a completed extraction satisfies Offer', () => {
-    // Offer → ExtractedOffer (required sale_price narrows into the optional slot)
+  it('a canonical Offer is accepted where ExtractedOffer is expected, and vice versa (attachable to Message.extracted_offer unchanged — ADR-005)', () => {
     const fromOffer: ExtractedOffer = {} as Offer;
-    // ExtractedOffer + sale_price → Offer (D1 fallback collapses cleanly once
-    // the chief's core amendment lands)
-    const toOffer: Offer = {} as ExtractedOffer & { sale_price: MoneyCents };
+    const toOffer: Offer = {} as ExtractedOffer;
     expect(fromOffer).toBeDefined();
     expect(toOffer).toBeDefined();
   });

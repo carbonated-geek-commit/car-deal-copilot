@@ -8,8 +8,8 @@
  * would invite I/O into a package whose value is that it cannot do any.
  *
  * The spine is referenced, never redefined: every domain shape is an
- * import from `@core` (`ExtractedOffer` is a derived projection of the
- * canonical `Offer` — design §0 D1 fallback; see extract.ts).
+ * import from `@core` (`ExtractedOffer` IS the canonical `Offer` — design
+ * §0 D1 resolved by ADR-005; see extract.ts).
  */
 
 export type { ExtractedOffer, ExtractionInput, ExtractionResult } from './extract.js';
