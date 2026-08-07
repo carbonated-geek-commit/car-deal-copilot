@@ -1,7 +1,7 @@
 ---
 id: T-008
 title: Receipt layer — append-only store contract + dossier export stub
-stage: design
+stage: build
 owner_agent: designer
 status: pending
 depends_on: [T-001]
@@ -37,3 +37,4 @@ A `packages/receipt` package exists containing the receipt-layer contract and an
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+2026-08-07 12:34 · designer · design complete (docs/design/T-008.md) — stage design → build; no blockers, interpretive calls R1–R9 logged in doc
