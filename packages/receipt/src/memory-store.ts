@@ -69,7 +69,7 @@ function validateInput(input: ReceiptEntryInput): string | null {
   if (input === null || typeof input !== 'object') {
     return 'entry input must be an object';
   }
-  if (!(input.kind in CHANNEL_BY_KIND)) {
+  if (typeof input.kind !== 'string' || !Object.hasOwn(CHANNEL_BY_KIND, input.kind)) {
     return 'unknown entry kind';
   }
   if (input.direction !== 'in' && input.direction !== 'out') {
