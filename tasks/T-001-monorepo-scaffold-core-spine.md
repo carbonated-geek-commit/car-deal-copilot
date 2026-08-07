@@ -7,6 +7,7 @@ status: pending
 depends_on: []
 file_ownership:
   - "package.json"
+  - "package-lock.json"
   - "tsconfig.base.json"
   - "vitest.config.*"
   - "vitest.workspace.ts"
@@ -53,3 +54,4 @@ A buildable TypeScript monorepo exists with workspace tooling (pnpm workspaces, 
 2026-08-07 · builder · built per design: root scaffold (npm install run once; package-lock.json committed as install artifact), packages/core contracts + trivial smoke spec; tsc --noEmit green, "npx vitest run packages/core" green (vitest 3.2.7 honors workspace file with deprecation notice); deviation note: core package.json marker named "@deal-copilot/core" — npm rejects bare "@core" as a package name; @core alias maps unchanged; stage build → test
 2026-08-07 · tester · test suite written per design §2–§6 (5 new specs in packages/core/test: domain/adapters/events contracts, webhook ack-then-queue + identity routing, spine invariants; + node-shim.d.ts test-scope ambient types since @types/node is not in the approved devDeps); 78/78 green via "npx vitest run packages/core", "tsc -p packages/core --noEmit" green; note for validator: §5.2 quarantine path has no dedicated typed payload — expressible only via generic EventEnvelope (T-009 must define it); stage test → validate
 2026-08-07 · fixer · verifier medium finding fixed: §5.2 quarantine payload is now a first-class core contract (CommsInboundQuarantinedV1 + CommsInboundPayloadV1 union in SpineEvent, pure isQuarantinedInbound guard); tests updated to consume it (local QuarantinedInboundV1 removed, quarantine SpineEvent coverage added), 82/82 green + tsc --noEmit green; high finding (package-lock.json ownership) and low finding (@deal-copilot/core name) require chief re-scope / designer-or-chief ratification per verifier's own remedy — escalated, no code change made
+2026-08-07 · chief · escalations resolved: ADR-004 ratifies @deal-copilot/* npm naming (bare aliases unchanged) and adds package-lock.json to T-001 file_ownership (re-scope); both verifier findings now citable-resolved; stage remains validate for re-verify
