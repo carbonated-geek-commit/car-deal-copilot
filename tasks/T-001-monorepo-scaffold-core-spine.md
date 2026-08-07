@@ -1,7 +1,7 @@
 ---
 id: T-001
 title: Monorepo scaffold + core spine contracts (packages/core)
-stage: design
+stage: build
 owner_agent: designer
 status: pending
 depends_on: []
@@ -47,3 +47,4 @@ A buildable TypeScript monorepo exists with workspace tooling (pnpm workspaces, 
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+2026-08-07 · designer · design doc published (docs/design/T-001.md); stage design → build; note: npm workspaces per orchestration constraint, pnpm-workspace.yaml intentionally not created (design D1)
