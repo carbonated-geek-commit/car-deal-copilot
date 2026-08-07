@@ -7,9 +7,10 @@ status: pending
 depends_on: []
 file_ownership:
   - "package.json"
-  - "pnpm-workspace.yaml"
   - "tsconfig.base.json"
+  - "vitest.config.*"
   - "vitest.workspace.ts"
+  - ".gitignore"
   - "packages/core/**"
 spec_refs:
   - "specs/00-shared-core-architecture.md#core-domain-model"
