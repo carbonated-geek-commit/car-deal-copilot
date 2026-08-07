@@ -110,11 +110,13 @@ Credit consent + soft pull → target (make/model/trim *or* "scan on the lot") �
 
 ## Concierge tier (consumer-only)
 
-A human runs the **same deal war room** on the user's behalf, using the **same burner identity**, so all proof is captured automatically. This is the "show the work" TikTok model, productized — the dossier *is* the deliverable. Explicitly **not** offered on B2B (that's a car-buyer-for-hire services business, deliberately out of scope).
+A human runs the **same deal war room** on the user's behalf, using the **same burner identity**. This is the "show the work" TikTok model, productized — the dossier *is* the deliverable.
+
+> **⚠ OPEN — escalated to Corban (gate verdict 2026-08-07-2, finding 9).** With transcription dropped (Q14), a concierge-run call produces **no independent artifact**: the record becomes the paid operator's own typed account of their own work. That is self-attestation at exactly the tier where the thesis names the receipt trail the deliverable. Text channels (SMS/email) are unaffected — those are captured verbatim. Pending decision: restore recording/transcription for the concierge rail only, restrict concierge to text channels, or accept operator-authored call notes with author labelling. Until resolved, no concierge implementation work may start. Explicitly **not** offered on B2B (that's a car-buyer-for-hire services business, deliberately out of scope).
 
 **Enforced agent controls** *(resolved 2026-08-07 — enforcement, not trust)*:
 1. **Role-scoped views** — the agent role sees the prequal summary only (qualified rate, budget); credit detail is absent from the agent API surface.
-2. **No export** — transcripts and receipt artifacts are viewable in-app by the agent; the export/download path does not exist on the agent role.
+2. **No export** — receipt artifacts (notes, messages, documents) are viewable in-app by the agent; the export/download path does not exist on the agent role.
 3. **Per-deal grants that expire** — access is granted per deal and auto-revokes on close/burn; no standing access to any account.
 4. **Full audit log** — every agent action (view, send, call) lands in the deal's append-only receipt trail, visible to the customer.
 5. **Identity cutout** — the agent never needs and never sees the customer's real identity or full profile; the design must function even when a pseudonymous cutout is the counterparty.

@@ -87,7 +87,7 @@ ValuationSnapshot · VehicleData   (cached, timestamped)
 
 *Enforcement:* `target_vehicle` is write-once — settable while the deal is `draft`, immutable once any offer is attached. An attempted change is rejected, not silently applied, and the rejection is a receipt-trail event.
 
-**Store:** Postgres for the relational core (deal → threads → messages → offers), object store (S3 or equiv.) for recordings and generated dossiers.
+**Store:** Postgres for the relational core (deal → threads → messages → offers), object store (S3 or equiv.) for email attachments, uploaded documents, and generated dossiers. No audio is stored.
 
 **`identity_ref` is deliberately provider-agnostic.** It points at *an* identity — a number + inbox — without the core caring who provisioned it. The consumer product fills it with an identity *we* issued; the B2B product fills it with one the user *connected*. Same threading downstream.
 
@@ -97,13 +97,13 @@ ValuationSnapshot · VehicleData   (cached, timestamped)
 
 This is the threading and capture engine. It handles messages regardless of who owns the underlying number/alias.
 
-**Inbound call:** `provider webhook → Comms service → (consent handling per product) → record/transcribe → store on DealerThread → run offer-extraction → notify owner.`
+**Inbound call:** `provider webhook → Comms service → log call metadata (time, direction, party) on DealerThread → notify owner → owner writes a note → run offer-extraction on the note.` No audio is captured and no transcription runs (consumer posture, specs/01; transcription is backlog).
 
 **Inbound SMS / email:** `webhook → thread onto DealerThread → extract offer.`
 
 **Outbound:** `owner acts in-app → sent via that deal's identity → dealer only ever sees the deal identity, never a real personal line.`
 
-**Offer extraction:** transcript/text/email → parsed `Offer` (price, fees, APR, term, monthly) attached to the message and rolled into the thread's `current_offer`.
+**Offer extraction:** any message text — buyer note, SMS, or email — → parsed `Offer` (price, fees, APR, term, monthly) attached to the message and rolled into the thread's `current_offer`. The extractor is channel-agnostic and never depends on how the text was produced.
 
 **Rule:** webhooks ack immediately, all heavy work (transcription, extraction) runs on the event bus. Provider timeouts must never drop a dealer message.
 
@@ -144,7 +144,7 @@ Blend into **wholesale vs trade-in vs retail**. Snapshot + cache.
 
 ### Receipt layer (trust engine)
 
-Every recording, transcript, SMS, email is **append-only, timestamped, exportable**. Generates a shareable **deal dossier** (PDF + web link). In consumer, this is the trust proof and concierge deliverable; in B2B, it's the audit/handoff artifact.
+Every **buyer note, SMS, email, and call-metadata record** is **append-only, timestamped, exportable**. (No recordings or transcripts exist — see specs/01 consent posture.) Each entry carries its **author** — buyer, concierge operator, or dealer — so self-authored evidence is never presented as if it came from the dealer. Generates a shareable **deal dossier** (PDF + web link). In consumer, this is the trust proof and concierge deliverable; in B2B, it's the audit/handoff artifact.
 
 ## Async backbone (shared)
 

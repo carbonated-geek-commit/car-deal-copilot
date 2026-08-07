@@ -64,7 +64,7 @@ Subscriber's own providers
 
 ## Pricing
 
-Subscription, org-level, monthly. Unlimited concurrent deals. **Axis resolved 2026-08-07: flat org fee + per-seat.** Org size tracks our webhook/storage/transcription cost well enough; connecting identities is never penalized (BYO is behavior we want); nothing is usage-metered in a way that reintroduces per-deal friction — the whole point is unlimited.
+Subscription, org-level, monthly. Unlimited concurrent deals. **Axis resolved 2026-08-07: flat org fee + per-seat.** Org size tracks our webhook/storage cost well enough (transcription is out of scope platform-wide per specs/01 — B2B included, so it is not a cost driver); connecting identities is never penalized (BYO is behavior we want); nothing is usage-metered in a way that reintroduces per-deal friction — the whole point is unlimited.
 
 ---
 
