@@ -107,7 +107,7 @@ This is the threading and capture engine. It handles messages regardless of who 
 
 **Offer extraction:** any message text — buyer note, SMS, or email — → parsed `Offer` (price, fees, APR, term, monthly) attached to the message and rolled into the thread's `current_offer`. The extractor is channel-agnostic and never depends on how the text was produced.
 
-**Rule:** webhooks ack immediately, all heavy work (transcription, extraction) runs on the event bus. Provider timeouts must never drop a dealer message.
+**Rule:** webhooks ack immediately, all heavy work (extraction, valuation refresh, notification) runs on the event bus. Provider timeouts must never drop a dealer message.
 
 *What differs by product — who provisions the identity, who is sender-of-record, and the consent obligations that ride with that — lives in each product spec, not here.*
 
