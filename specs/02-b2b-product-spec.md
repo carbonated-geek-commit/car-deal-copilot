@@ -1,4 +1,4 @@
-# B2B Product Spec (v0.2)
+# B2B Product Spec (v0.3)
 
 *Builds on [Shared Core](./00-shared-core-architecture.md). A distinct business from the [Consumer product](./01-consumer-product-spec.md) — different buyer, pricing, liability model, and explicitly a different set of things it refuses to do. This spec covers only what's B2B-specific.*
 

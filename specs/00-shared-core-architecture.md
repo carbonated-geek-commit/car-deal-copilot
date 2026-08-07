@@ -1,4 +1,4 @@
-# Shared Core — Architecture Spine (v0.1)
+# Shared Core — Architecture Spine (v0.3)
 
 *The common spine underneath both products. The [Consumer Spec](./01-consumer-product-spec.md) and the [B2B Spec](./02-b2b-product-spec.md) reference this doc and diverge from it — they never redefine what's here. If a model or service is in this file, it is the single source of truth for both.*
 
@@ -63,10 +63,12 @@ DealerThread                (the per-deal relationship with ONE dealership)
 ├── messages[]
 └── current_offer
 
-Message
-├── channel   (call | sms | email)
-├── direction (in | out)
-├── body | recording_url | transcript
+Message                     ← chief-proposed shape, awaiting Corban's ratification
+├── channel   (call | sms | email | note)
+├── direction (in | out | internal)     internal = the buyer's/operator's own record
+├── author    (dealer | buyer | concierge)   who produced this text — never inferred
+├── body      (text; verbatim for sms/email, authored for note)
+├── call_meta?                          (started_at, duration, party) when channel = call
 ├── timestamp
 └── extracted_offer?
 
@@ -148,7 +150,7 @@ Every **buyer note, SMS, email, and call-metadata record** is **append-only, tim
 
 ## Async backbone (shared)
 
-Event bus (SNS/SQS, Kafka, or managed queue) drives inbound-comms processing, transcription, offer extraction, valuation refresh, alert dispatch. Keeps real-time paths fast.
+Event bus (SNS/SQS, Kafka, or managed queue) drives inbound-comms processing, offer extraction, valuation refresh, alert dispatch. Keeps real-time paths fast.
 
 ## Stack (opinionated — shared defaults)
 
