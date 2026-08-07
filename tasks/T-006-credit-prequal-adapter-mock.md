@@ -1,7 +1,7 @@
 ---
 id: T-006
 title: Credit prequal adapter — pass-through mock (token + prequal results only)
-stage: test
+stage: validate
 owner_agent: builder
 status: pending
 depends_on: [T-001]
@@ -38,3 +38,4 @@ A `packages/adapters/credit-prequal` package exists with a mock credit-provider 
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 undefined · designer · design doc produced (docs/design/T-006.md); interpretive calls D1-D6 logged; stage design → build
 undefined · builder · built packages/adapters/credit-prequal per docs/design/T-006.md (mock adapter + fixtures, zero deps, tsc clean); tests left to tester; stage build → test
+undefined · tester · wrote test/credit-prequal.test.ts (31 tests: §5.1-5.6 round trip, serialization + type-level leak checks, full §4.1 error table incl. fixture-drift and duplicate-id paths, never-throws, determinism, log-safe messages, export-surface/no-webhook check); npx vitest run + tsc --noEmit both clean; stage test → validate
