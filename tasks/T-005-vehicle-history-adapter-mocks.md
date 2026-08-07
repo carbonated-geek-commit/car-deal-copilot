@@ -1,7 +1,7 @@
 ---
 id: T-005
 title: Vehicle-history adapters — Carfax-mock + AutoCheck-mock (accident/title)
-stage: test
+stage: validate
 owner_agent: builder
 status: pending
 depends_on: [T-001]
@@ -38,3 +38,4 @@ A `packages/adapters/vehicle-history` package exists with mock adapter implement
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 2026-08-07 12:34 · designer · design doc produced (docs/design/T-005.md); stage design → build; no blockers, interpretive calls D1–D5 logged in doc
 2026-08-07 · builder · package implemented per design (src only; tests left to tester); tsc -p package clean; stage build → test
+2026-08-07 · tester · co-located vitest suites written (test/carfax-mock, test/autocheck-mock, test/contract); 63 tests pass offline, tsc clean; error table T-001 §5.1 covered row by row incl. auth-unreachable; stage test → validate
