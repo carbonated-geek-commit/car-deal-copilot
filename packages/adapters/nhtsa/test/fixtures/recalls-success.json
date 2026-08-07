@@ -1,0 +1,36 @@
+{
+  "Count": 2,
+  "Message": "Results returned successfully",
+  "results": [
+    {
+      "Manufacturer": "Ford Motor Company",
+      "NHTSACampaignNumber": "16V643000",
+      "parkIt": false,
+      "parkOutSide": false,
+      "ReportReceivedDate": "09/06/2016",
+      "Component": "LATCHES/LOCKS/LINKAGES:DOORS:LATCH",
+      "Summary": "Ford Motor Company (Ford) is recalling certain 2012-2015 Ford F-150 vehicles. The affected vehicles have side door latches that may experience a compromised pawl spring tab, resulting in a door that may not latch or may unlatch while driving.",
+      "Consequence": "A door that unlatches while driving increases the risk of injury.",
+      "Remedy": "Ford will notify owners, and dealers will replace the side door latches, free of charge.",
+      "Notes": "Owners may contact Ford customer service at 1-866-436-7332. Ford's number for this recall is 16S30.",
+      "ModelYear": "2013",
+      "Make": "FORD",
+      "Model": "F-150"
+    },
+    {
+      "Manufacturer": "Ford Motor Company",
+      "NHTSACampaignNumber": "17V209000",
+      "parkIt": false,
+      "parkOutSide": false,
+      "ReportReceivedDate": "03/29/2017",
+      "Component": "SEAT BELTS:FRONT:ANCHORAGE",
+      "Summary": "Ford Motor Company (Ford) is recalling certain 2013 Ford F-150 vehicles. Increased resistance in the driver's frontal air bag circuit may cause a delayed or non-deployment of the driver's frontal air bag in a crash.",
+      "Consequence": "A delayed or non-deployment of the driver's frontal air bag increases the risk of injury in a crash.",
+      "Remedy": "Ford will notify owners, and dealers will repair the affected circuit, free of charge.",
+      "Notes": "Owners may contact Ford customer service at 1-866-436-7332.",
+      "ModelYear": "2013",
+      "Make": "FORD",
+      "Model": "F-150"
+    }
+  ]
+}

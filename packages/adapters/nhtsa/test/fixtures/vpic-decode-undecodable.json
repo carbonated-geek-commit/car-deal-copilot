@@ -1,0 +1,34 @@
+{
+  "Count": 1,
+  "Message": "Results returned successfully. NOTE: Any missing decoded values should be interpreted as NHTSA does not have data on the specific variable. Missing value should NOT be interpreted as an indication that a feature is not present.",
+  "SearchCriteria": "VIN:ZZZZZZZZZZZZZZZZZ",
+  "Results": [
+    {
+      "ABS": "",
+      "BodyClass": "",
+      "DisplacementCC": "",
+      "DisplacementL": "",
+      "Doors": "",
+      "DriveType": "",
+      "EngineConfiguration": "",
+      "EngineCylinders": "",
+      "EngineModel": "",
+      "ErrorCode": "8",
+      "ErrorText": "8 - No detailed data available currently",
+      "Make": "",
+      "MakeID": "",
+      "Manufacturer": "",
+      "ManufacturerId": "",
+      "Model": "",
+      "ModelID": "",
+      "ModelYear": "",
+      "PlantCity": "",
+      "PlantCountry": "",
+      "Series": "",
+      "Trim": "",
+      "VIN": "ZZZZZZZZZZZZZZZZZ",
+      "VehicleDescriptor": "ZZZZZZZZ*ZZ",
+      "VehicleType": ""
+    }
+  ]
+}
