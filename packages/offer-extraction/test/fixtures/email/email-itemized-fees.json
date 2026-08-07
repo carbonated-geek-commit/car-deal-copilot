@@ -1,0 +1,19 @@
+{
+  "name": "email-itemized-fees",
+  "channel": "email",
+  "text": "Hi Alex,\n\nHere is the full breakdown on the sedan we looked at:\n\nSale price: $27,800\nDoc fee: $499\nDestination: $1,395\nDealer prep: $300\n\nFinancing is available at 5.9% APR for 60 months.\n\nThanks,\nJamie",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [
+        { "name": "Doc fee", "amount": 49900 },
+        { "name": "Destination", "amount": 139500 },
+        { "name": "Dealer prep", "amount": 30000 }
+      ],
+      "flags": [],
+      "sale_price": 2780000,
+      "apr": 5.9,
+      "term_months": 60
+    }
+  }
+}

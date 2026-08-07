@@ -1,7 +1,7 @@
 ---
 id: T-007
 title: Offer extraction v1 — rule-based transcript/text → parsed Offer
-stage: test
+stage: validate
 owner_agent: builder
 status: in_progress
 depends_on: [T-001]
@@ -39,3 +39,4 @@ A `packages/offer-extraction` package exists containing a rule-based v1 extracto
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 2026-08-07 · designer · design doc published (docs/design/T-007.md); stage design → build; deviation flagged for chief (design D1): AC-2+AC-4 partial offers require core `Offer.sale_price` to become optional — needs chief ADR + T-001-ownership amendment before T-007 build merges; fallback documented in design
 2026-08-07 · builder · implemented packages/offer-extraction per design §1–§4 (extractOffer: normalize → fees/monthly/apr/term/price rules with span claiming → gate; zero deps, pure/total/deterministic, flags always []); D1 STILL OPEN: no chief ADR landed and core `Offer.sale_price` remains required, so build uses the design-sanctioned FALLBACK — `ExtractedOffer = Omit<Offer,'sale_price'> & {sale_price?}` derived from @core (no parallel type); collapses to `Offer` in one line if chief lands the core amendment — chief must resolve D1 before merge; tsc -p packages/offer-extraction --noEmit green; behavior smoke-checked against design §6 examples via temporary vitest run (removed — tests belong to tester stage); stage build → test
+2026-08-07 · tester · validation suite added (test/extract.test.ts unit suite + test/corpus.test.ts generic runner over 17 synthetic JSON fixtures in test/fixtures/{transcripts,sms,email,hostile} per design §6/D7): covers D6 money/term conventions, D5 disambiguation + precision omissions, APR/term bounds, fee span claiming, AC-3 channel-agnostic parity, AC-4 partial-offer gate, D4 totality (hostile/binary/huge input, 2s wall-clock budget), §4.3 determinism + fresh non-mutating results, §2 single-export surface (no webhook/ack/queue path exists), AC-2 type-level projection checks (D1 fallback); 52/52 pass, tsc --noEmit green, full workspace 443 pass / 1 pre-existing opt-in skip; no implementation defects found; D1 chief resolution remains the only open gate; stage test → validate

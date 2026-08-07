@@ -1,0 +1,8 @@
+{
+  "name": "hostile-binary-garbage",
+  "channel": "sms",
+  "text": "\u0000\u0001\u0002��<<>>%%$$##@@!!~~^^**(())a1b2c3#4d5e\u001b[31mx\u0007",
+  "expected": {
+    "found": false
+  }
+}

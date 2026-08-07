@@ -1,0 +1,13 @@
+{
+  "name": "email-quoted-reply-stale-offer",
+  "channel": "email",
+  "text": "We can do $24,250 on it. Let me know if that works for you.\n\nOn Tue, Aug 4, 2026 at 9:12 AM Jordan Rivera wrote:\n> Appreciate it. Earlier you quoted $26,900 plus an $899 doc fee.\n> Can you do any better on the doc fee?",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [],
+      "flags": [],
+      "sale_price": 2425000
+    }
+  }
+}

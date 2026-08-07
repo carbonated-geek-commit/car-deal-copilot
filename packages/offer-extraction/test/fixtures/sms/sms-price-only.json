@@ -1,0 +1,13 @@
+{
+  "name": "sms-price-only",
+  "channel": "sms",
+  "text": "We can do $23,500 out the door for the Camry.",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [],
+      "flags": [],
+      "sale_price": 2350000
+    }
+  }
+}
