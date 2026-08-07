@@ -58,6 +58,27 @@ export interface FeeFairCap {
   max_amount: MoneyCents;
 }
 
+/**
+ * Evaluation result (ADR-005). A flag whose required inputs are absent is NOT
+ * emitted and is surfaced in `unevaluable` — distinguishable from
+ * "evaluated, not triggered" (present in neither list). Missing inputs are
+ * never defaulted to zero.
+ *
+ * Required inputs per flag:
+ *  - payment_packing: `term_months` (evaluable from term alone — ADR-005 §2)
+ *  - rate_markup:     `apr` AND `context.qualified_apr`
+ *  - junk_fee:        none beyond `fees[]` (always present) — always evaluable
+ *  - over_walkaway:   `sale_price` (unevaluable when the dealer stated no price)
+ *
+ * Both arrays are duplicate-free, disjoint, and in OFFER_FLAGS order (design D7).
+ */
+export interface FlagEvaluation {
+  /** Flags that were evaluated and fired. */
+  flags: OfferFlag[];
+  /** Flags that could not be assessed because a required input is absent (ADR-005). */
+  unevaluable: OfferFlag[];
+}
+
 /** Normalization applied to both sides of the fee-name match (design D6). */
 function normalizeFeeName(name: string): string {
   return name.trim().toLowerCase();
@@ -80,43 +101,47 @@ function capFor(feeName: string, config: FlagEngineConfig): MoneyCents | undefin
 
 /**
  * Evaluate an offer against the buyer's context and injected thresholds,
- * returning the full recomputed flag set.
+ * returning the full recomputed flag set plus the unevaluable set (ADR-005).
  *
  * Rules (specs/00 "Flag engine (shared)", boundary semantics per design D4):
- *  - payment_packing: term_months present && >= config.stretched_term_min_months
- *  - rate_markup:     apr && qualified_apr present && apr > qualified_apr + tolerance
+ *  - payment_packing: term_months >= config.stretched_term_min_months
+ *  - rate_markup:     apr > qualified_apr + tolerance
  *  - junk_fee:        any fee.amount > its matched cap (fee_fair_caps, else unmatched_fee_cap)
  *  - over_walkaway:   sale_price + Σ fees[].amount > walk_away_number  (design D2)
  *
- * Missing optional inputs mean "not assessed", never "throw" and never "fire"
- * (design D3). `offer.flags` on input is ignored; callers replace, never merge
- * (design D5). The result is duplicate-free and in OFFER_FLAGS order (design D7).
+ * Missing required inputs make the affected flag *unevaluable* — it is not
+ * emitted and is reported in `unevaluable`, never treated as zero (ADR-005,
+ * refining design D3's "not assessed, never throw, never fire").
+ * `offer.flags` on input is ignored; callers replace, never merge (design D5).
+ * Both result arrays are duplicate-free and in OFFER_FLAGS order (design D7).
  */
 export function evaluateOffer(
   offer: Offer,
   context: FlagContext,
   config: FlagEngineConfig,
-): OfferFlag[] {
+): FlagEvaluation {
   const fired = new Set<OfferFlag>();
+  const unevaluable = new Set<OfferFlag>();
 
   // payment_packing — term stretched to shrink the monthly (AC-2).
-  if (
-    offer.term_months !== undefined &&
-    offer.term_months >= config.stretched_term_min_months
-  ) {
+  // Evaluable from the term alone (ADR-005 §2).
+  if (offer.term_months === undefined) {
+    unevaluable.add('payment_packing');
+  } else if (offer.term_months >= config.stretched_term_min_months) {
     fired.add('payment_packing');
   }
 
   // rate_markup — APR above what the buyer qualifies for (AC-3).
-  if (
-    offer.apr !== undefined &&
-    context.qualified_apr !== undefined &&
-    offer.apr > context.qualified_apr + config.rate_markup_tolerance_points
-  ) {
+  // Requires both the offer's APR and the buyer's qualified APR.
+  if (offer.apr === undefined || context.qualified_apr === undefined) {
+    unevaluable.add('rate_markup');
+  } else if (offer.apr > context.qualified_apr + config.rate_markup_tolerance_points) {
     fired.add('rate_markup');
   }
 
-  // junk_fee — any add-on/fee above fair value (AC-4).
+  // junk_fee — any add-on/fee above fair value (AC-4). `fees[]` is a required
+  // spine field, so this flag is always evaluable (an empty list evaluates to
+  // "not triggered", not "unevaluable").
   for (const fee of offer.fees) {
     const cap = capFor(fee.name, config);
     if (cap !== undefined && fee.amount > cap) {
@@ -125,15 +150,24 @@ export function evaluateOffer(
     }
   }
 
-  // over_walkaway — out-the-door total crosses the walk-away number (AC-5, design D2).
-  let total: MoneyCents = offer.sale_price;
-  for (const fee of offer.fees) {
-    total += fee.amount;
-  }
-  if (total > context.walk_away_number) {
-    fired.add('over_walkaway');
+  // over_walkaway — out-the-door total crosses the walk-away number (AC-5,
+  // design D2). Requires a stated price: a missing sale_price is NEVER
+  // defaulted to zero (ADR-005) — the flag is unevaluable instead.
+  if (offer.sale_price === undefined) {
+    unevaluable.add('over_walkaway');
+  } else {
+    let total: MoneyCents = offer.sale_price;
+    for (const fee of offer.fees) {
+      total += fee.amount;
+    }
+    if (total > context.walk_away_number) {
+      fired.add('over_walkaway');
+    }
   }
 
-  // Fixed OFFER_FLAGS ordering, duplicate-free by construction (design D7).
-  return OFFER_FLAGS.filter((flag) => fired.has(flag));
+  // Fixed OFFER_FLAGS ordering, duplicate-free and disjoint by construction (design D7).
+  return {
+    flags: OFFER_FLAGS.filter((flag) => fired.has(flag)),
+    unevaluable: OFFER_FLAGS.filter((flag) => unevaluable.has(flag)),
+  };
 }

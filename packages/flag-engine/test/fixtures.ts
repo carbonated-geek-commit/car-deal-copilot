@@ -56,11 +56,13 @@ export function makeOffer(overrides: Partial<Offer> = {}): Offer {
 }
 
 /**
- * Benign offer with optional fields removed (design D3 "not assessed").
+ * Benign offer with optional fields removed (design D3 "not assessed";
+ * ADR-005 "unevaluable"). `sale_price` is removable since ADR-005 made it
+ * optional (absent = dealer did not state a price).
  * `delete` (not spread-with-undefined) keeps exactOptionalPropertyTypes happy.
  */
 export function makeOfferWithout(
-  keys: ReadonlyArray<'apr' | 'term_months' | 'monthly'>,
+  keys: ReadonlyArray<'apr' | 'term_months' | 'monthly' | 'sale_price'>,
   overrides: Partial<Offer> = {},
 ): Offer {
   const offer = makeOffer(overrides);
