@@ -1,8 +1,8 @@
 ---
 id: T-006
 title: Credit prequal adapter — pass-through mock (token + prequal results only)
-stage: build
-owner_agent: designer
+stage: test
+owner_agent: builder
 status: pending
 depends_on: [T-001]
 file_ownership:
@@ -37,3 +37,4 @@ A `packages/adapters/credit-prequal` package exists with a mock credit-provider 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 undefined · designer · design doc produced (docs/design/T-006.md); interpretive calls D1-D6 logged; stage design → build
+undefined · builder · built packages/adapters/credit-prequal per docs/design/T-006.md (mock adapter + fixtures, zero deps, tsc clean); tests left to tester; stage build → test
