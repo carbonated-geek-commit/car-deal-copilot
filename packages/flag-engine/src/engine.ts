@@ -1,0 +1,139 @@
+/**
+ * THE flag engine — specs/00-shared-core-architecture.md "Flag engine (shared)".
+ *
+ * Pure, provider-agnostic, synchronous, total function of
+ * `Offer` + qualified-rate + walk-away (docs/design/T-002.md §2).
+ * No I/O, no clock, no randomness, no logging, no mutation of any argument,
+ * no exceptions on well-typed input.
+ *
+ * All spine vocabulary comes from `@core` (ADR-001 no-parallel-types,
+ * ADR-002 `payment_packing` canonical). This module defines ONLY the engine's
+ * own input types (`FlagContext`, `FlagEngineConfig`, `FeeFairCap`).
+ */
+
+import { OFFER_FLAGS } from '@core';
+import type { MoneyCents, Offer, OfferFlag } from '@core';
+
+/**
+ * The buyer/deal side of the evaluation — the "qualified-rate + walk-away"
+ * of specs/00 "Flag engine (shared)". Field names mirror the spine sources
+ * they are read from; this type is a projection, not a parallel model.
+ */
+export interface FlagContext {
+  /**
+   * Buyer's qualified APR, same units as Offer.apr (e.g. 6.9).
+   * Sourced from PrequalResult.qualified_apr (@core, specs/01 credit residency:
+   * derived number only — no credit payload can pass through this field).
+   * Absent when the buyer has no prequal → rate_markup is not assessed (design D3).
+   */
+  qualified_apr?: number;
+  /** Deal.walk_away_number (@core), integer USD cents. */
+  walk_away_number: MoneyCents;
+}
+
+/**
+ * Injectable thresholds (design D1 — required, no defaults; business constants
+ * are the caller's to cite, not this engine's to invent).
+ */
+export interface FlagEngineConfig {
+  /** Term at/above which the term counts as stretched (>=, design D4). Spec example: 72. */
+  stretched_term_min_months: number;
+  /**
+   * APR points of excess over qualified_apr tolerated before rate_markup
+   * fires (strict >, design D4). 0 = any excess flags.
+   */
+  rate_markup_tolerance_points: number;
+  /** Fair-value caps per fee (design D6). A fee whose amount strictly exceeds its cap is junk. */
+  fee_fair_caps: readonly FeeFairCap[];
+  /**
+   * Cap applied to fees matching no entry in fee_fair_caps.
+   * Omitted = unmatched fees never flag (design D6).
+   */
+  unmatched_fee_cap?: MoneyCents;
+}
+
+export interface FeeFairCap {
+  /** Matched against OfferFee.name after normalization: trim + lowercase, exact match. */
+  name: string;
+  max_amount: MoneyCents;
+}
+
+/** Normalization applied to both sides of the fee-name match (design D6). */
+function normalizeFeeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
+ * Resolve the fair-value cap for a fee name: first exact match in
+ * fee_fair_caps (after normalization), else the catch-all unmatched_fee_cap,
+ * else undefined (fee never flags — design D6).
+ */
+function capFor(feeName: string, config: FlagEngineConfig): MoneyCents | undefined {
+  const normalized = normalizeFeeName(feeName);
+  for (const cap of config.fee_fair_caps) {
+    if (normalizeFeeName(cap.name) === normalized) {
+      return cap.max_amount;
+    }
+  }
+  return config.unmatched_fee_cap;
+}
+
+/**
+ * Evaluate an offer against the buyer's context and injected thresholds,
+ * returning the full recomputed flag set.
+ *
+ * Rules (specs/00 "Flag engine (shared)", boundary semantics per design D4):
+ *  - payment_packing: term_months present && >= config.stretched_term_min_months
+ *  - rate_markup:     apr && qualified_apr present && apr > qualified_apr + tolerance
+ *  - junk_fee:        any fee.amount > its matched cap (fee_fair_caps, else unmatched_fee_cap)
+ *  - over_walkaway:   sale_price + Σ fees[].amount > walk_away_number  (design D2)
+ *
+ * Missing optional inputs mean "not assessed", never "throw" and never "fire"
+ * (design D3). `offer.flags` on input is ignored; callers replace, never merge
+ * (design D5). The result is duplicate-free and in OFFER_FLAGS order (design D7).
+ */
+export function evaluateOffer(
+  offer: Offer,
+  context: FlagContext,
+  config: FlagEngineConfig,
+): OfferFlag[] {
+  const fired = new Set<OfferFlag>();
+
+  // payment_packing — term stretched to shrink the monthly (AC-2).
+  if (
+    offer.term_months !== undefined &&
+    offer.term_months >= config.stretched_term_min_months
+  ) {
+    fired.add('payment_packing');
+  }
+
+  // rate_markup — APR above what the buyer qualifies for (AC-3).
+  if (
+    offer.apr !== undefined &&
+    context.qualified_apr !== undefined &&
+    offer.apr > context.qualified_apr + config.rate_markup_tolerance_points
+  ) {
+    fired.add('rate_markup');
+  }
+
+  // junk_fee — any add-on/fee above fair value (AC-4).
+  for (const fee of offer.fees) {
+    const cap = capFor(fee.name, config);
+    if (cap !== undefined && fee.amount > cap) {
+      fired.add('junk_fee');
+      break;
+    }
+  }
+
+  // over_walkaway — out-the-door total crosses the walk-away number (AC-5, design D2).
+  let total: MoneyCents = offer.sale_price;
+  for (const fee of offer.fees) {
+    total += fee.amount;
+  }
+  if (total > context.walk_away_number) {
+    fired.add('over_walkaway');
+  }
+
+  // Fixed OFFER_FLAGS ordering, duplicate-free by construction (design D7).
+  return OFFER_FLAGS.filter((flag) => fired.has(flag));
+}
