@@ -7,8 +7,11 @@
  * Envelopes are bus-neutral: plain JSON-serializable, idempotency-keyed.
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import { isQuarantinedInbound } from '@core';
 import type {
   AlertDispatchRequestedV1,
+  CommsInboundPayloadV1,
+  CommsInboundQuarantinedV1,
   CommsInboundReceivedV1,
   EventEnvelope,
   Offer,
@@ -185,7 +188,8 @@ describe('all eight envelopes are constructible and JSON round-trip unchanged (b
     for (const e of all) {
       switch (e.type) {
         case 'comms.inbound.received.v1':
-          expectTypeOf(e.payload).toEqualTypeOf<CommsInboundReceivedV1>();
+          expectTypeOf(e.payload).toEqualTypeOf<CommsInboundPayloadV1>();
+          if (isQuarantinedInbound(e.payload)) throw new Error('expected parsed payload');
           expect(e.payload.inbound.provider_message_ref).toBe('SM123');
           break;
         case 'offer.extraction.completed.v1':
@@ -207,6 +211,63 @@ describe('all eight envelopes are constructible and JSON round-trip unchanged (b
     expectTypeOf<AlertDispatchRequestedV1['kind']>().toEqualTypeOf<
       'flag_raised' | 'offer_received' | 'message_received'
     >();
+  });
+});
+
+describe('quarantine variant — comms.inbound.received.v1 carries parse failures (§5.2, binding)', () => {
+  const qPayload: CommsInboundQuarantinedV1 = {
+    source: 'mock-telephony',
+    parse_error: {
+      code: 'malformed_response',
+      retryable: false,
+      source: 'mock-telephony',
+      message: 'webhook payload did not match expected provider shape',
+    },
+    raw_payload_ref: 'raw/1',
+  };
+
+  const quarantined: SpineEvent = {
+    event_id: 'evt-q1',
+    type: 'comms.inbound.received.v1',
+    occurred_at: T0,
+    idempotency_key: 'mock-telephony:quarantine:evt-q1',
+    payload: qPayload,
+  };
+
+  it('a quarantine envelope IS a valid SpineEvent — no local type or untyped cast needed', () => {
+    // the `quarantined` literal above typechecks as SpineEvent; runtime sanity:
+    expect(quarantined.type).toBe('comms.inbound.received.v1');
+  });
+
+  it('round-trips JSON.parse(JSON.stringify(...)) unchanged (bus-serializable)', () => {
+    expect(JSON.parse(JSON.stringify(quarantined))).toEqual(quarantined);
+  });
+
+  it('isQuarantinedInbound narrows both variants of the inbound payload', () => {
+    const parsed: CommsInboundPayloadV1 = {
+      source: 'mock-telephony',
+      inbound: {
+        channel: 'sms',
+        to_identity: { phone_number: '+15550001111' },
+        from: { phone: '+15559990000' },
+        body: 'We can do 28,500',
+        provider_message_ref: 'SM123',
+        received_at: T0,
+      },
+    };
+    const q: CommsInboundPayloadV1 = qPayload;
+    expect(isQuarantinedInbound(parsed)).toBe(false);
+    expect(isQuarantinedInbound(q)).toBe(true);
+    if (isQuarantinedInbound(q)) {
+      expectTypeOf(q).toEqualTypeOf<CommsInboundQuarantinedV1>();
+      expect(q.parse_error.retryable).toBe(false);
+    }
+  });
+
+  it('quarantine carries a raw-payload REFERENCE, never the raw payload itself', () => {
+    const keys = Object.keys(quarantined.payload).sort();
+    expect(keys).toEqual(['parse_error', 'raw_payload_ref', 'source']);
+    expectTypeOf<CommsInboundQuarantinedV1['raw_payload_ref']>().toEqualTypeOf<string>();
   });
 });
 

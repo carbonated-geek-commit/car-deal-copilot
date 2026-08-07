@@ -52,8 +52,9 @@ describe('append-only receipt posture — no update/delete surface in core', () 
       /(update|delete|remove|mutate|purge|redact|overwrite)/i.test(n),
     );
     expect(mutatorish).toEqual([]);
-    // The only runtime export is the ADR-002 flag vocabulary.
-    expect(names).toEqual(['OFFER_FLAGS']);
+    // Runtime exports: the ADR-002 flag vocabulary + the pure §5.2 quarantine
+    // narrowing guard (design allows "a small amount of pure helper code").
+    expect(names.sort()).toEqual(['OFFER_FLAGS', 'isQuarantinedInbound']);
   });
 
   it('core source declares no update/delete/remove method on any contract', () => {

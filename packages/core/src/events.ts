@@ -22,7 +22,7 @@ import type {
   OfferFlag,
   ValuationSnapshot,
 } from './domain.js';
-import type { InboundComms, ValuationRequest } from './adapters.js';
+import type { AdapterError, InboundComms, ValuationRequest } from './adapters.js';
 
 export interface EventEnvelope<
   TType extends SpineEventType = SpineEventType,
@@ -59,6 +59,33 @@ export interface CommsInboundReceivedV1 {
   source: string;
   inbound: InboundComms;
 }
+
+/**
+ * Quarantine variant of the inbound payload — docs/design/T-001.md §5.2
+ * (binding): when `parseInboundWebhook` fails, the handler STILL acks 2xx and
+ * enqueues a `comms.inbound.received.v1` carrying the parse-error marker and a
+ * reference to the stashed raw payload for quarantine/replay. specs/00:
+ * "Provider timeouts must never drop a dealer message."
+ */
+export interface CommsInboundQuarantinedV1 {
+  /** Adapter id whose parse failed. */
+  source: string;
+  /** Typically `code: 'malformed_response'` (§5.2 failure table). */
+  parse_error: AdapterError;
+  /**
+   * Reference to where the raw provider payload was stashed for replay —
+   * never the payload itself (raw payloads are never logged or bused).
+   */
+  raw_payload_ref: string;
+}
+
+/** What a `comms.inbound.received.v1` envelope carries: parsed or quarantined. */
+export type CommsInboundPayloadV1 = CommsInboundReceivedV1 | CommsInboundQuarantinedV1;
+
+/** Pure narrowing guard so consumers (T-009) never need an untyped cast. */
+export const isQuarantinedInbound = (
+  payload: CommsInboundPayloadV1,
+): payload is CommsInboundQuarantinedV1 => 'parse_error' in payload;
 
 // -- transcription (calls; consumer policy = transcribe-only, no audio retention)
 export interface TranscriptionRequestedV1 {
@@ -115,7 +142,7 @@ export interface AlertDispatchRequestedV1 {
 
 // Convenience union for typed consumers:
 export type SpineEvent =
-  | EventEnvelope<'comms.inbound.received.v1', CommsInboundReceivedV1>
+  | EventEnvelope<'comms.inbound.received.v1', CommsInboundPayloadV1>
   | EventEnvelope<'comms.transcription.requested.v1', TranscriptionRequestedV1>
   | EventEnvelope<'comms.transcription.completed.v1', TranscriptionCompletedV1>
   | EventEnvelope<'offer.extraction.requested.v1', OfferExtractionRequestedV1>

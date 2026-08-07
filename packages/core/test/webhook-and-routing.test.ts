@@ -14,10 +14,10 @@
  * contracts — proving the contracts force/support the mandated shape (AC-7).
  */
 import { describe, expect, it } from 'vitest';
+import { isQuarantinedInbound } from '@core';
 import type {
-  AdapterError,
   AdapterResult,
-  CommsInboundReceivedV1,
+  CommsInboundPayloadV1,
   Deal,
   EventEnvelope,
   InboundComms,
@@ -29,18 +29,10 @@ const T0 = '2026-08-07T12:00:00Z';
 
 // ------------------------------------------------------------ test doubles
 
-/** Quarantine payload for unparseable webhooks (§5.2 row 1): the generic
- * envelope carries a parse-error marker + raw payload reference. */
-interface QuarantinedInboundV1 {
-  source: string;
-  parse_error: AdapterError;
-  raw_payload_ref: string;
-}
-
-type InboundEnvelope = EventEnvelope<
-  'comms.inbound.received.v1',
-  CommsInboundReceivedV1 | QuarantinedInboundV1
->;
+/** Quarantine payload for unparseable webhooks (§5.2 row 1) is a first-class
+ * core contract (`CommsInboundQuarantinedV1`) — the inbound envelope carries
+ * the parsed|quarantined union, so no local type or cast is needed. */
+type InboundEnvelope = EventEnvelope<'comms.inbound.received.v1', CommsInboundPayloadV1>;
 
 class TestBus {
   events: InboundEnvelope[] = [];
@@ -149,9 +141,9 @@ describe('webhook ack-then-queue (§5.2, binding)', () => {
     expect(
       bus.events.filter((ev) => !ev.type.startsWith('comms.inbound')),
     ).toHaveLength(0);
-    const payload = e.payload as CommsInboundReceivedV1;
-    expect(payload.inbound.provider_message_ref).toBe('SM123');
-    expect(payload.inbound.body).toContain('28,500');
+    if (isQuarantinedInbound(e.payload)) throw new Error('expected parsed payload');
+    expect(e.payload.inbound.provider_message_ref).toBe('SM123');
+    expect(e.payload.inbound.body).toContain('28,500');
   });
 
   it('the ack decision is made synchronously — parse result is not a thenable', () => {
@@ -165,7 +157,8 @@ describe('webhook ack-then-queue (§5.2, binding)', () => {
     const res = handleWebhook(mockTelephony, { garbage: true }, bus);
     expect(res.status).toBe(200); // 5xx would make the provider retry the same junk forever
     expect(bus.events).toHaveLength(1);
-    const q = bus.events[0]!.payload as QuarantinedInboundV1;
+    const q = bus.events[0]!.payload;
+    if (!isQuarantinedInbound(q)) throw new Error('expected quarantined payload');
     expect(q.parse_error.code).toBe('malformed_response');
     expect(q.raw_payload_ref).toMatch(/^raw\//); // replayable
   });
@@ -194,7 +187,8 @@ describe('webhook ack-then-queue (§5.2, binding)', () => {
     for (const e of bus.events) {
       if (seen.has(e.idempotency_key)) continue;
       seen.add(e.idempotency_key);
-      const inbound = (e.payload as CommsInboundReceivedV1).inbound;
+      if (isQuarantinedInbound(e.payload)) continue; // quarantined: nothing to thread yet
+      const inbound = e.payload.inbound;
       thread.push({
         channel: inbound.channel,
         direction: 'in',
