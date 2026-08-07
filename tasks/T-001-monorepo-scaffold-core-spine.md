@@ -49,3 +49,4 @@ A buildable TypeScript monorepo exists with workspace tooling (pnpm workspaces, 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
 2026-08-07 · designer · design doc published (docs/design/T-001.md); stage design → build; note: npm workspaces per orchestration constraint, pnpm-workspace.yaml intentionally not created (design D1)
+2026-08-07 · designer · idempotent verification pass: design confirmed complete vs specs/00 + ADR-001/002; D1 and §9 updated to cite ADR-003 (deviation resolved, none open)
