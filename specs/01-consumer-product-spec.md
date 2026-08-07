@@ -1,4 +1,4 @@
-# Consumer Product Spec (v0.1)
+# Consumer Product Spec (v0.2)
 
 *Builds on [Shared Core](./00-shared-core-architecture.md). Distinct from the [B2B product](./02-b2b-product-spec.md) — different buyer, pricing, and liability posture. This spec covers only what's specific to the consumer business.*
 
@@ -40,7 +40,18 @@ Threading/capture/extraction is the shared aggregation layer. What's consumer-sp
 
 - **We are sender-of-record.** So the consent and isolation obligations are *ours* (see Open Decisions).
 - **Whisper on forward:** if forwarding an inbound call to the user's real phone, ring with a whisper ("call from your Honda deal") so their real number never touches the dealer.
-- **Burn:** release or quarantine the number, disable the alias, archive (never delete) the thread. Quarantine prevents a released number reaching a stranger with the old dealer's follow-up.
+- **Number lifecycle (user-controlled — Burn / Keep / Re-use):** on deal close the user chooses:
+  - **Burn** — the number is detached from the deal profile and the user's name/profile is never attached to it again; the alias is disabled; the thread is archived (never deleted). Platform-side, a burned number is **retired to the carrier at launch — never reassigned to another platform user** (zero cross-user leakage; revisit pooling only if number cost bites at scale).
+  - **Keep** — the number stays attached to the closed deal's profile on the user's account; the user monitors anything that still arrives on it.
+  - **Re-use** — when opening a new deal, the user may carry a number they generated in a previous deal into the new deal.
+
+## Consent & recording posture *(resolved 2026-08-07)*
+
+**Transcribe-only, no audio retention — uniform in all states.** Calls are transcribed in real time; no audio is ever stored. `Message.recording_url` stays null by policy on consumer; the receipt trail and dossier carry transcripts. No per-state policy engine exists or is planned.
+
+## Credit data residency *(resolved 2026-08-07)*
+
+**Pass-through only.** Soft pull runs in the credit provider's hosted flow; we store a provider token + prequal results (qualified APR, amounts) and nothing else. Raw credit data never lands in our systems — the full FCRA/GLBA data-holder build is intentionally avoided.
 
 ## The shopping-path fork *(onboarding)*
 
@@ -92,13 +103,16 @@ Credit consent + soft pull → target (make/model/trim *or* "scan on the lot") �
 
 A human runs the **same deal war room** on the user's behalf, using the **same burner identity**, so all proof is captured automatically. This is the "show the work" TikTok model, productized — the dossier *is* the deliverable. Explicitly **not** offered on B2B (that's a car-buyer-for-hire services business, deliberately out of scope).
 
+**Enforced agent controls** *(resolved 2026-08-07 — enforcement, not trust)*:
+1. **Role-scoped views** — the agent role sees the prequal summary only (qualified rate, budget); credit detail is absent from the agent API surface.
+2. **No export** — transcripts and receipt artifacts are viewable in-app by the agent; the export/download path does not exist on the agent role.
+3. **Per-deal grants that expire** — access is granted per deal and auto-revokes on close/burn; no standing access to any account.
+4. **Full audit log** — every agent action (view, send, call) lands in the deal's append-only receipt trail, visible to the customer.
+5. **Identity cutout** — the agent never needs and never sees the customer's real identity or full profile; the design must function even when a pseudonymous cutout is the counterparty.
+6. **No signing authority** — the concierge agent cannot execute the purchase or sign documents; final purchase and signatures are customer-only acts.
+
 ---
 
-## Open decisions — YOUR call
+## Resolved decisions (v0.2)
 
-Generic error-path discipline is baked into Shared Core. These are consumer-specific and yours to name, because *we're sender-of-record* here:
-
-1. **Call-recording consent posture.** Two-party-consent states: record (disclosure-gated) or transcribe-only / no-record? Legal exposure concentrates here.
-2. **Burner-number reuse.** Retire forever (cleanest isolation, higher cost) or quarantine-and-reuse (cheaper, non-zero leakage risk)? What structurally prevents a dealer reaching a stranger?
-3. **Credit data residency.** Does credit data land in *your* DB (full FCRA/GLBA weight) or stay pass-through to a provider's hosted flow so it never touches your systems?
-4. **Concierge agent access.** A human operating a user's burner identity and adjacent-to-credit data — what must that agent *never* see or do, enforced rather than trusted?
+All four v0.1 open decisions were resolved in the 2026-08-07 architect interview and are folded into the sections above (consent posture, number lifecycle, credit residency, concierge controls). Full answers with rationale: `decisions/OPEN-QUESTIONS.md` Q1–Q4 and Q9.
