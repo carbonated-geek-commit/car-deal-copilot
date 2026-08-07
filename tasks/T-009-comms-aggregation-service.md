@@ -1,7 +1,7 @@
 ---
 id: T-009
 title: Comms aggregation service — in-memory (ack-then-queue webhooks, threading, extraction)
-stage: design
+stage: build
 owner_agent: designer
 status: pending
 depends_on: [T-001, T-007]
@@ -42,3 +42,4 @@ A `services/comms` service exists implementing the shared comms aggregation engi
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+2026-08-07 · designer · design doc published (docs/design/T-009.md); stage design → build; interfaces exposed: transport-neutral WebhookIntake (T-001 §5.2 ack-then-queue table encoded as WebhookIngestOutcome, 200 = durably enqueued incl. CommsInboundQuarantinedV1 quarantine path, enqueue failure = only 503) + CommsReadModel; ports with named swap seams (EventQueue→SQS/SNS, CommsStore→Postgres, RawPayloadStore→S3); identity routing exact-match-only over authoritative bindIdentity table, unmatched → unrouted holding (never guessed, never dropped); extraction consumer-only via @offer-extraction, partial Offers per ADR-005; deviation flagged for lead (design D4): current_offer rollup merge rule (per-field newest-message-wins accumulation, fallback wholesale-replace) is an interpretive call beyond spec text "rolled into" — needs lead resolve-and-log ADR before build merges; blast radius contained to rollup.ts
