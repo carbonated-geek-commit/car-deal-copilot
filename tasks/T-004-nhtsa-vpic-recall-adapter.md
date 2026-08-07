@@ -1,9 +1,9 @@
 ---
 id: T-004
 title: Vehicle-data adapter — NHTSA vPIC + Recall API (live-approved, fixture-tested)
-stage: validate
-owner_agent: designer
-status: pending
+stage: done
+owner_agent: verifier
+status: done
 depends_on: [T-001]
 file_ownership:
   - "packages/adapters/nhtsa/**"
@@ -40,3 +40,4 @@ A `packages/adapters/nhtsa` package exists implementing the vehicle-data adapter
 2026-08-07 · designer · design doc published (docs/design/T-004.md); interpretive calls D1–D9 logged; stage → build
 2026-08-07 · builder · adapter implemented per design (packages/adapters/nhtsa: zero-dep injectable-fetch client, D2 two-step recalls, toVehicleData helper, recorded fixtures); tsc clean; stage → test
 2026-08-07 · tester · co-located vitest suite added (decode/recalls/vehicle-data + opt-in live smoke): 77 tests green, hermetic fixture-injected fetch, every §4.1/§4.2 error row + D2 two-step + D6 zero-retry + export-surface checks; tsc clean; stage → validate
+2026-08-07 · verifier · validated + reviewed diff main...epic-1-shared-spine for T-004 ownership paths: scope clean (all 5 T-004 commits inside packages/adapters/nhtsa/** + task file + design doc), protected paths untouched, traceability clean (AC-1..4 traced; interpretive calls D1–D9 logged design §0 with spec/ADR basis; ADR-004 name @deal-copilot/adapters-nhtsa conforms), boundary clean (zero deps in package.json; imports only @core/vitest/node:fs-in-tests; endpoints exactly the live-approved free NHTSA vPIC + Recall API; sole env var NHTSA_LIVE is the D7 opt-in test gate; no secrets in code or fixtures), invariants clean (anti-corruption structural — raw shapes internal-only, export-surface test pins it; stateless, zero internal retries per T-001 §5.1; VIN-free log-safe messages; no webhook/comms surface; error mapping matches design §4.1/§4.2 row-for-row); independently re-ran npx vitest run packages/adapters/nhtsa (77 green, live smoke skipped by default) and tsc -p packages/adapters/nhtsa --noEmit (clean); tester on record pass; zero findings → approve; stage validate → done
