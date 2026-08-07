@@ -47,7 +47,16 @@ Threading/capture/extraction is the shared aggregation layer. What's consumer-sp
 
 ## Consent & recording posture *(resolved 2026-08-07)*
 
-**Transcribe-only, no audio retention — uniform in all states.** Calls are transcribed in real time; no audio is ever stored. `Message.recording_url` stays null by policy on consumer; the receipt trail and dossier carry transcripts. No per-state policy engine exists or is planned.
+**No recording and no transcription — the buyer writes the notes.** *(Amended 2026-08-07: automated transcription is dropped from scope and moved to backlog.)*
+
+The buyer types what the dealer said, in their own words, and the offer extractor parses the terms out of that text — the extractor is channel-agnostic, so a typed note works exactly like any other message. Consequences:
+
+- `Message.recording_url` stays null by policy; no audio is ever captured or stored.
+- No ASR/transcription provider is required, so none is approved or wired.
+- Legal exposure from two-party-consent states is **avoided entirely** rather than managed — there is nothing to consent to.
+- The receipt trail carries buyer-authored notes with timestamps. They are weaker evidence than a recording, and that trade is accepted.
+
+**Backlog:** if call transcription is ever revived, it re-opens the consent question and requires a new decision plus an approved provider.
 
 ## Credit data residency *(resolved 2026-08-07)*
 
@@ -75,7 +84,7 @@ Credit consent + soft pull → target (make/model/trim *or* "scan on the lot") �
 | # | Screen | Purpose |
 |---|--------|---------|
 | W1 | **Dashboard** (Glovebox) | All active deals, budget, pre-qual loans, walk-away. |
-| W2 | **Deal War Room** | Core screen. Dealer threads side-by-side, offer grid, packing/markup/junk-fee flags, walk-away tracker, **burner inbox** (calls/texts/emails threaded per dealer). |
+| W2 | **Deal War Room** | Core screen. One vehicle, **many dealerships side-by-side**: offer grid, packing/markup/junk-fee flags, walk-away tracker, and per-dealership **who you're working with** (agent → sales manager → finance manager) plus **process step** (information gather → deal negotiation → deal approval → financing → final sale → pickup). Entry is **notes-first** — the buyer types what was said and the extractor parses the offer out of it. **Burner inbox** (texts/emails threaded per dealership) lands post-beta. |
 | W3 | **Compare & Fine-Print** | Side-by-side vehicles; TCO layer; contract line-item decoder. |
 | W4 | **Vault** | Saved cars, closed deals, ownership tracker — repair ledger + "keep or dump" month for a car you bought. |
 

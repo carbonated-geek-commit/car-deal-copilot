@@ -31,17 +31,35 @@ Deal
 ├── id, owner_id            (owner = User in consumer, Org/Seat in B2B)
 ├── path                    (online | hybrid | in_person)   ← consumer-driven; B2B may ignore
 ├── status                  (draft | active | negotiating | closed | burned)
-├── target_vehicle          (spec)
+├── target_vehicle          (VehicleSpec — EXACTLY ONE, immutable after first offer)
 ├── resolved_vehicle        (VIN, once identified)
 ├── budget, walk_away_number
 ├── identity_ref            (→ provider-agnostic; see Comms below)
-├── dealer_threads[]
+├── dealer_threads[]        (MANY dealerships may sit inside one deal)
 ├── offers[]
 ├── receipt_bundle_id
 └── created_at, burned_at
 
-DealerThread
-├── dealer_id / name, contact info
+VehicleSpec
+├── make, model, year, trim
+├── mileage                 (odometer; absent for new)
+├── condition               (new | used | certified)
+└── additions[]             (options, packages, dealer add-ons)
+
+Dealership                  (shared entity — many deals may reference the same one)
+├── id, name
+├── state, city, zip_code
+└── staff[]                 (StaffMember: name + role)
+
+StaffMember
+└── name, role              (general_manager | sales_manager | finance_manager | sales_agent)
+
+DealerThread                (the per-deal relationship with ONE dealership)
+├── dealership_id           (→ Dealership)
+├── working_with            (→ StaffMember — who you are dealing with right now)
+├── process_step            (information_gather | deal_negotiation | deal_approval
+│                            | financing | final_sale | pickup)
+├── contact info
 ├── messages[]
 └── current_offer
 
@@ -58,6 +76,16 @@ Offer
 
 ValuationSnapshot · VehicleData   (cached, timestamped)
 ```
+
+### Cardinality invariants (structurally enforced)
+
+**One deal, one vehicle — always.** `Account → Deal → Vehicle` is strictly 1:1. A deal never covers two vehicles; `Account1 → Deal1 → Vehicle2` must be unrepresentable, not merely discouraged.
+
+**One deal, many dealerships.** `Deal.dealer_threads[]` holds a thread per dealership, which is what makes the side-by-side war room work — the same vehicle spec shopped against several dealers at once.
+
+**Why the vehicle is immutable:** a dealership that can't deliver the car you came for will try to move you onto whatever is on their lot ("that one just sold, but I've got this other one…"). If a deal's vehicle could be swapped in place, that substitution would vanish into an existing negotiation, taking its valuation, walk-away number, and offer history with it. **Switching vehicles requires opening a new Deal.** The switch therefore always leaves a mark in the receipt trail, and the abandoned deal stands as evidence of the bait-and-switch.
+
+*Enforcement:* `target_vehicle` is write-once — settable while the deal is `draft`, immutable once any offer is attached. An attempted change is rejected, not silently applied, and the rejection is a receipt-trail event.
 
 **Store:** Postgres for the relational core (deal → threads → messages → offers), object store (S3 or equiv.) for recordings and generated dossiers.
 

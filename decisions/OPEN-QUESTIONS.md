@@ -73,3 +73,27 @@
 
 ### Q10 — Backend language *(spec leaves FastAPI vs Node/TS open)*
 **ANSWER:** **Deferred to the Chief Architect, to be logged as an ADR** — 2026-08-07. Per the constitution, choosing among named alternates is within the chief's authority; the choice must land in `decisions/adr/` before dependent work.
+
+### Q11 — Deal ↔ Vehicle ↔ Dealership cardinality
+**Context:** Corban's hierarchy note (2026-08-07) pinned the shape the spine must enforce.
+**ANSWER:** **One vehicle per deal (immutable); many dealerships per deal** — 2026-08-07.
+`Account → Deal → Vehicle` is 1:1 and `Account1 → Deal1 → Vehicle2` must be unrepresentable. `Deal.dealer_threads[]` stays an array — the side-by-side war room across dealerships is preserved.
+**Rationale (Corban):** "Dealerships will try to move a customer from a vehicle based on their availability, the only way to do that is start a new Deal structure." Making the vehicle immutable forces the substitution into a new deal, so the bait-and-switch always leaves a mark in the receipt trail instead of being laundered inside an existing negotiation. `target_vehicle` is write-once: settable while `draft`, rejected once any offer is attached, with the rejection recorded as a receipt event.
+
+### Q12 — Dealership entity shape
+**ANSWER:** **First-class shared `Dealership` + per-deal relationship fields** — 2026-08-07.
+`Dealership` (shared across deals): name, state, city, zip_code, `staff[]` of {name, role} where role ∈ {general_manager, sales_manager, finance_manager, sales_agent}.
+`DealerThread` (the per-deal relationship): `dealership_id`, `working_with` (which staff member the buyer is dealing with now), and `process_step` ∈ {information_gather, deal_negotiation, deal_approval, financing, final_sale, pickup}.
+**Rationale:** who you're handed to and how far along you are is negotiation state, not dealership state — the same dealership sits at different steps in different deals. Tracking the hand-off up the chain (agent → sales manager → finance manager) is itself buyer leverage.
+
+### Q13 — Dealership data sourcing
+**ANSWER:** **No Maps/business API at launch — user-entered, mock the structure, batch-load later** — 2026-08-07.
+**Rationale:** Corban withdrew the Google Maps Places API request. The buyer types dealership details; the schema is built to accept a bulk import later. **Consequence: no new integration and no new spend is required**, so nothing here needs escalation.
+
+### Q14 — Call transcription
+**ANSWER:** **Dropped from scope; moved to backlog** — 2026-08-07.
+The buyer writes notes and the extractor parses them (it is channel-agnostic, so typed notes work like any other message). No ASR provider is needed or approved. This supersedes Q1's transcribe-only posture: two-party-consent exposure is now avoided rather than managed. Reviving transcription re-opens Q1 and requires an approved provider.
+
+### Q15 — Private-party / marketplace comps
+**Context:** Corban asked for KBB private-party value plus Facebook Marketplace vehicles. Meta publishes no Marketplace API; automated scraping violates their ToS and carries legal and blocking risk.
+**ANSWER:** PENDING — KBB private-party is already covered by the existing mock-only KBB approval; the Marketplace sourcing method (user-pasted listings vs. licensed aggregator vs. other classifieds with real APIs) is still Corban's call. Blocks the valuation epic only.
