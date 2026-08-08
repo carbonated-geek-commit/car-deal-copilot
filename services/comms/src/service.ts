@@ -41,7 +41,12 @@ export interface CommsReadModel {
   getThread(deal_id: string, dealership_id: string): DealerThread | undefined;
   /** The no-drop holding areas. */
   listQuarantined(): readonly QuarantinedRecord[];
-  listUnrouted(): readonly UnroutedRecord[];
+  /**
+   * Held inbound items. Pass `deal_id` for the account-scoped view (only
+   * records attributed to that deal); the unscoped call spans every deal and
+   * is an OPERATOR-ONLY surface — see `CommsStoreReader.listUnrouted` (AC-9).
+   */
+  listUnrouted(deal_id?: string): readonly UnroutedRecord[];
 }
 
 export interface CommsServiceDeps {
@@ -111,7 +116,7 @@ export function createCommsService(deps: CommsServiceDeps): CommsService {
       return thread === undefined ? undefined : structuredClone(thread);
     },
     listQuarantined: () => structuredClone([...store.listQuarantined()]),
-    listUnrouted: () => structuredClone([...store.listUnrouted()]),
+    listUnrouted: (deal_id) => structuredClone([...store.listUnrouted(deal_id)]),
   };
 
   return { intake, notes, read };

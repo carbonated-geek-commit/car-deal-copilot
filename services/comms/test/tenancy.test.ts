@@ -25,6 +25,7 @@ import {
   DEALER_PHONE,
   DEALERSHIP_A,
   DEALERSHIP_B,
+  FIXED_NOW,
   IDENTITY_A,
   IDENTITY_B,
   makeDeal,
@@ -150,33 +151,30 @@ describe('tenancy: Dealership global, DealershipContact account-private (AC-9, D
     expect(threads[0]!.current_offer!.sale_price).toBe(19_000_00);
   });
 
-  it('FINDING (D10): the HELD item is not replayable — the router already marked its ledger key', async () => {
-    // docs/design/T-014.md D10 is the one behavior change this task
-    // introduced, and its entire justification is that nothing is lost:
-    // "the item is held whole, operator-visible, and replayable once the buyer
-    // names the dealership" (§7 deviation 3; §3.2 rows 4-5 both say "Held
-    // whole, replayable").
+  it('D10: the HELD item IS replayable — replaying it verbatim threads it once the buyer names the dealership', async () => {
+    // REGRESSION GUARD for the fixed finding. docs/design/T-014.md D10 is the
+    // one behavior change this task introduced, and its entire justification is
+    // that nothing is lost: "the item is held whole, operator-visible, and
+    // replayable once the buyer names the dealership" (§7 deviation 3; §3.2
+    // rows 4-5 both say "Held whole, replayable").
     //
-    // It is not replayable. `inbound-router` calls `markProcessed` on BOTH
-    // unrouted branches, and `intake.ts` derives the idempotency key
-    // deterministically from the payload (`<source>:<provider_message_ref>`).
-    // So any honest replay — re-entering the held `InboundComms` through
-    // `parseInboundWebhook`, which is the replay path the design names in its
-    // §4 quarantine row — produces the SAME key, hits the ledger belt, and
-    // returns `done` without routing. The dealership's first message stays in
-    // the holding area forever.
+    // It was NOT replayable as first built: `inbound-router` called
+    // `markProcessed` on BOTH unrouted branches, and `intake.ts` derives the
+    // idempotency key deterministically from the payload
+    // (`<source>:<provider_message_ref>`), identical before and after the
+    // operator's fix. So the honest replay — re-entering the held
+    // `InboundComms` through `parseInboundWebhook`, the replay path the design
+    // itself names — hit the ledger belt and returned `done` without routing,
+    // stranding the dealership's FIRST message forever.
     //
-    // Note the asymmetry that shows this is an oversight rather than a policy:
-    // a QUARANTINED payload replays correctly, because a fixed adapter makes
-    // the parse succeed and the key changes from `<source>:quarantine:<ref>`
-    // to `<source>:<provider_message_ref>`. Only the unrouted branches are
-    // keyed identically before and after the operator's fix.
-    //
-    // The keyed write is already sufficient for the dedupe this branch needs:
-    // `recordUnrouted` no-ops on `(source, provider_message_ref)`, which is
-    // what "a redelivered unroutable message does not duplicate the holding
-    // record" (routing.test.ts) actually relies on. Not marking the ledger on
-    // these two branches would preserve that and restore replay.
+    // Fix: the two unrouted branches no longer mark the ledger. §3.2's own
+    // "Retry / idempotency" cell for those rows names the KEYED WRITE, not the
+    // ledger — `recordUnrouted` no-ops on `(source, provider_message_ref)`,
+    // which is what "a redelivered unroutable message does not duplicate the
+    // holding record" (routing.test.ts) actually relies on. Dedupe preserved,
+    // replay restored. The quarantine branch still marks and is unaffected: a
+    // fixed adapter changes ITS key from `<source>:quarantine:<ref>` to the
+    // parsed key, so its replay was never blocked by its own ledger entry.
     const h = makeHarness();
     seedDeal(h, 'deal-a', IDENTITY_A);
     const held = smsPayload({
@@ -198,6 +196,110 @@ describe('tenancy: Dealership global, DealershipContact account-private (AC-9, D
     expect(threads).toHaveLength(1);
     expect(threads[0]!.dealership_id).toBe(DEALERSHIP_B);
     expect(threads[0]!.messages).toHaveLength(1);
+    // …and the holding area is not left carrying a phantom copy of a message
+    // that is now properly threaded.
+    expect(h.service.read.listUnrouted()).toHaveLength(1);
+    expect(h.service.read.listUnrouted()[0]!.inbound.provider_message_ref).toBe('sms-stranger');
+  });
+
+  it('replaying a held item that only PARTLY recovers upgrades the holding record instead of no-oping', async () => {
+    // The keyed `recordUnrouted` write is now the only dedupe these branches
+    // have, so it must not silently swallow a CHANGED verdict. Recovery can
+    // arrive in two steps: the buyer binds the identity first, and only later
+    // names the dealership. The middle replay resolves the deal but still
+    // misses the contact — the operator must see `no_thread_match` WITH the
+    // deal_id on it, not the stale `no_identity_match` it was first held under.
+    const h = makeHarness();
+    h.store.putDeal(makeDeal('deal-a')); // no identity_ref yet — nothing is bound
+
+    const held = smsPayload({
+      ref: 'sms-stranger',
+      fromPhone: '+15550209999',
+      body: 'The price is $19,000.',
+      at: T1,
+    });
+    await h.service.intake.ingest('telephony', held);
+    await h.queue.drain();
+
+    let unrouted = h.service.read.listUnrouted();
+    expect(unrouted).toHaveLength(1);
+    expect(unrouted[0]!.reason).toBe('no_identity_match');
+    expect(unrouted[0]!.deal_id).toBeUndefined(); // no deal owns it yet
+
+    // Step 1 of the recovery: the identity is bound, the dealership is not.
+    h.store.bindIdentity('deal-a', IDENTITY_A);
+    await h.service.intake.ingest('telephony', held);
+    await h.queue.drain();
+
+    unrouted = h.service.read.listUnrouted();
+    expect(unrouted).toHaveLength(1); // still ONE row — dedupe intact
+    expect(unrouted[0]!.reason).toBe('no_thread_match'); // …upgraded, not stale
+    expect(unrouted[0]!.deal_id).toBe('deal-a');
+    expect(unrouted[0]!.recorded_at).toBe(FIXED_NOW); // when it was HELD
+    expect(h.service.read.getDeal('deal-a')!.dealer_threads).toHaveLength(0);
+
+    // Step 2: the buyer names the dealership and the same payload finally lands.
+    h.store.bindThreadContact('deal-a', DEALERSHIP_B, { phone: '+15550209999' });
+    await h.service.intake.ingest('telephony', held);
+    await h.queue.drain();
+
+    const thread = h.service.read.getDeal('deal-a')!.dealer_threads[0]!;
+    expect(thread.dealership_id).toBe(DEALERSHIP_B);
+    expect(thread.messages).toHaveLength(1);
+  });
+
+  it('listUnrouted is scopable by deal: an account-scoped view never spans deals', async () => {
+    // D10 put deal-ATTRIBUTABLE content into the holding area — a
+    // `no_thread_match` record carries the whole InboundComms (body, sender
+    // phone) plus its deal_id. Every other read on this port is parameterized
+    // by deal_id; this one must be too, or it is the single surface on which
+    // account isolation is inexpressible (AC-9) — the exact inverse of the
+    // pattern D9 fixed for the account-private contact index.
+    const h = makeHarness();
+    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    h.store.putDeal(makeDeal('deal-b', IDENTITY_B));
+
+    // Held against deal A (known deal, unknown sender).
+    await h.service.intake.ingest(
+      'telephony',
+      smsPayload({ ref: 'sms-a', fromPhone: '+15550209999', body: 'deal A body', at: T1 }),
+    );
+    // Held against deal B.
+    await h.service.intake.ingest(
+      'telephony',
+      smsPayload({
+        ref: 'sms-b',
+        toPhone: IDENTITY_B.phone_number!,
+        fromPhone: '+15550208888',
+        body: 'deal B body',
+        at: T2,
+      }),
+    );
+    // Attributable to NO account: nothing owns the identity that was contacted.
+    await h.service.intake.ingest(
+      'telephony',
+      smsPayload({ ref: 'sms-orphan', toPhone: '+15550100999', body: 'orphan body', at: T2 }),
+    );
+    await h.queue.drain();
+
+    // The operator surface sees everything.
+    expect(h.service.read.listUnrouted()).toHaveLength(3);
+
+    const scopedA = h.service.read.listUnrouted('deal-a');
+    expect(scopedA).toHaveLength(1);
+    expect(scopedA[0]!.inbound.provider_message_ref).toBe('sms-a');
+    // Deal B's body and deal B's sender are not reachable through deal A's view.
+    expect(JSON.stringify(scopedA)).not.toContain('deal B body');
+    expect(JSON.stringify(scopedA)).not.toContain('+15550208888');
+
+    const scopedB = h.service.read.listUnrouted('deal-b');
+    expect(scopedB).toHaveLength(1);
+    expect(scopedB[0]!.inbound.provider_message_ref).toBe('sms-b');
+
+    // An unattributable item belongs to no account, so it appears in NEITHER
+    // scoped view — only in the operator one.
+    expect(JSON.stringify([...scopedA, ...scopedB])).not.toContain('orphan body');
+    expect(h.service.read.listUnrouted('deal-nonexistent')).toHaveLength(0);
   });
 
   it('a contact bound in deal A never resolves inside deal B (the index is deal-scoped)', async () => {

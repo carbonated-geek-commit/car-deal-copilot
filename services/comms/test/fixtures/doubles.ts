@@ -180,7 +180,7 @@ export class DelegatingStore implements CommsStore {
   listQuarantined(): readonly QuarantinedRecord[] {
     return this.note('listQuarantined', () => this.inner.listQuarantined());
   }
-  listUnrouted(): readonly UnroutedRecord[] {
-    return this.note('listUnrouted', () => this.inner.listUnrouted());
+  listUnrouted(deal_id?: string): readonly UnroutedRecord[] {
+    return this.note('listUnrouted', () => this.inner.listUnrouted(deal_id));
   }
 }

@@ -258,11 +258,33 @@ export class InMemoryCommsStore implements CommsStore {
     this.quarantined.push(structuredClone(rec));
   }
 
+  /**
+   * Keyed on `(source, provider_message_ref)` — the write that makes a plain
+   * provider redelivery a no-op (design §3.2 rows 4-5), and, since the router
+   * no longer marks the ledger on these branches, the ONLY dedupe they have.
+   *
+   * On a keyed hit the held item is UPDATED IN PLACE rather than dropped: the
+   * inbound payload is identical by construction (same source, same provider
+   * ref), but `reason` and `deal_id` are the operator-facing fields and they
+   * can legitimately improve on replay — an item first held as
+   * `no_identity_match` and replayed after the buyer binds the identity, but
+   * before the dealership contact is known, resolves the deal and comes back
+   * as `{no_thread_match, deal_id}`. Returning early there would leave the
+   * operator reading a stale `no_identity_match` with no `deal_id` on it,
+   * trading one silent gap for another. The record stays exactly one row and
+   * `recorded_at` keeps the FIRST hold time — when it was held, not when it
+   * was last re-examined.
+   */
   recordUnrouted(rec: UnroutedRecord): void {
-    const dupe = this.unrouted.some(
+    const existing = this.unrouted.find(
       (u) => u.source === rec.source && u.inbound.provider_message_ref === rec.inbound.provider_message_ref,
     );
-    if (dupe) return;
+    if (existing !== undefined) {
+      existing.reason = rec.reason;
+      if (rec.deal_id !== undefined) existing.deal_id = rec.deal_id;
+      else delete existing.deal_id;
+      return;
+    }
     this.unrouted.push(structuredClone(rec));
   }
 
@@ -304,8 +326,9 @@ export class InMemoryCommsStore implements CommsStore {
     return this.quarantined;
   }
 
-  listUnrouted(): readonly UnroutedRecord[] {
-    return this.unrouted;
+  listUnrouted(deal_id?: string): readonly UnroutedRecord[] {
+    if (deal_id === undefined) return this.unrouted;
+    return this.unrouted.filter((u) => u.deal_id === deal_id);
   }
 
   // -- internals ----------------------------------------------------------

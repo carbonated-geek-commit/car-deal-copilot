@@ -126,7 +126,27 @@ export interface CommsStoreReader {
   /** Correlation-index lookup — the rollup reads the contributing Message.timestamp here. */
   getMessageByRef(deal_id: string, message_ref: string): StoredMessage | undefined;
   listQuarantined(): readonly QuarantinedRecord[];
-  listUnrouted(): readonly UnroutedRecord[];
+  /**
+   * Operator surface over the unrouted holding area.
+   *
+   * `deal_id` is OPTIONAL but load-bearing (AC-9). D10 put deal-ATTRIBUTABLE
+   * content into this table: a `no_thread_match` record carries the whole
+   * `InboundComms` — body, `from.phone`/`from.email` — plus the `deal_id` it
+   * was addressed to. `getDeal`/`getThread` are parameterized by `deal_id`, so
+   * an account-scoped caller can be built on top of them; without this
+   * parameter this one table would be the only read on which that scoping is
+   * INEXPRESSIBLE — the exact inverse of the pattern D9 fixed for the contact
+   * index.
+   *
+   * Scoped ⇒ only records carrying that `deal_id`. `no_identity_match` records
+   * carry none — nothing owns the identity that was contacted, so they belong
+   * to no account and appear ONLY in the unscoped operator view.
+   *
+   * Unscoped ⇒ every held record across every deal. That call is an
+   * OPERATOR-ONLY surface and must never be reached from an account-scoped API
+   * (T-019/T-020 inherit this rule).
+   */
+  listUnrouted(deal_id?: string): readonly UnroutedRecord[];
 }
 
 export interface CommsStore extends CommsStoreReader {

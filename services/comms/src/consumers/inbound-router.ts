@@ -20,6 +20,18 @@
  *
  * Idempotency: ledger peek first (belt); every write is a keyed no-op (braces);
  * markProcessed only after all writes AND publishes succeed — a retry never marks.
+ *
+ * ONE DELIBERATE EXCEPTION (design §3.2 rows 4-5, D10): the two UNROUTED
+ * branches do NOT mark the ledger. Their §3.2 "Retry / idempotency" cell names
+ * the KEYED WRITE — `recordUnrouted` no-ops on `(source, provider_message_ref)`
+ * — as the mechanism, and their outcome cell says "Held whole, REPLAYABLE".
+ * `intake.ts` derives the key deterministically from the payload
+ * (`<source>:<provider_message_ref>`), so it is identical before and after the
+ * operator's fix; marking it would make the belt swallow the very replay the
+ * design names as the recovery path, stranding a dealership's FIRST message
+ * permanently. The quarantine branch is different and still marks: a fixed
+ * adapter changes its key (`<source>:quarantine:<ref>` → the parsed key), so
+ * its replay is not blocked by its own ledger entry.
  */
 
 import type {
@@ -116,7 +128,9 @@ export function createInboundRouter(deps: InboundRouterDeps): EventHandler {
         reason: 'no_identity_match',
         recorded_at: deps.now(),
       });
-      deps.store.markProcessed(INBOUND_ROUTER, event.idempotency_key);
+      // NOT marked (see header): the keyed `recordUnrouted` write IS the
+      // dedupe, and leaving the ledger clean is what makes the held item
+      // replayable once the buyer binds the identity.
       return { status: 'done' };
     }
 
@@ -133,7 +147,10 @@ export function createInboundRouter(deps: InboundRouterDeps): EventHandler {
         deal_id,
         recorded_at: deps.now(),
       });
-      deps.store.markProcessed(INBOUND_ROUTER, event.idempotency_key);
+      // NOT marked (see header): replaying this exact payload after the buyer
+      // names the dealership is D10's entire justification — "held whole,
+      // operator-visible, and replayable". `recordUnrouted` is keyed, so a
+      // plain provider redelivery still cannot duplicate the holding record.
       return { status: 'done' };
     }
 
