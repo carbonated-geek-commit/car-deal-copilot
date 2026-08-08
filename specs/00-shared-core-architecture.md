@@ -78,8 +78,11 @@ Message                     (ratified by Corban 2026-08-07)
 └── extracted_offer?
 
 Offer
-├── sale_price, fees[], apr, term_months, monthly
-└── flags[]   (packing | rate_markup | junk_fee | over_walkaway)
+├── sale_price?             (absent = the dealer stated no price — ADR-005)
+├── fees[], apr?, term_months?, monthly?
+└── flags[]   (payment_packing | rate_markup | junk_fee | over_walkaway | above_market)
+               ADR-002 fixes `payment_packing` as canonical.
+               `above_market` = priced above THIS car's own valuation (per-instance).
 
 ValuationSnapshot           (ALWAYS of one specific car — never of a bare make/model)
 ├── vehicle_instance_id     (→ VehicleInstance)
@@ -159,7 +162,8 @@ Consumes an `Offer`, emits `flags[]`:
 - **payment_packing** — term stretched (72/84 mo) to shrink the monthly.
 - **rate_markup** — APR above what the buyer qualifies for.
 - **junk_fee** — add-ons / fees above fair value.
-- **over_walkaway** — total crosses the deal's walk-away number.
+- **over_walkaway** — out-the-door total crosses the deal's **budget ceiling**.
+- **above_market** — the offer is priced above **this specific car's** own valuation. Distinct from `over_walkaway`: a car can be inside your budget and still a bad price, or over budget and priced fairly.
 
 Provider-agnostic, pure function of `Offer` + user's qualified-rate + walk-away + **the instance's market value** (see "Budget ceiling vs. fair price"). Consumer UI foregrounds these; B2B pros may treat them as advisory. A flag whose required input is absent is **unevaluable**, never silently passed (ADR-005).
 
