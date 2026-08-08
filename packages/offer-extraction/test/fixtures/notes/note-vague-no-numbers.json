@@ -1,0 +1,8 @@
+{
+  "name": "note-vague-no-numbers",
+  "channel": "note",
+  "text": "uh so um he was like I I mean you know the uh the thing with the with the trim, yeah maybe",
+  "expected": {
+    "found": false
+  }
+}

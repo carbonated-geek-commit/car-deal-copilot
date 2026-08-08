@@ -1,0 +1,13 @@
+{
+  "name": "note-spoken-monthly",
+  "channel": "note",
+  "text": "He said, um, he talked to his manager and thinks they can get me to four fifty a month on that trim.",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [],
+      "flags": [],
+      "monthly": 45000
+    }
+  }
+}
