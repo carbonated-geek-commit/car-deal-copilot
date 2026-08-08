@@ -1,8 +1,8 @@
 ---
 id: T-011
 title: Flag engine v0.5 — per-instance market-value input and the above_market flag
-stage: build
-owner_agent: designer
+stage: test
+owner_agent: builder
 status: in_progress
 depends_on: [T-010]
 file_ownership:
@@ -46,3 +46,4 @@ mock_only: false
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half A: v0.5 domain migration)
 2026-08-07 21:32 · designer · design complete → docs/design/T-011.md (D8–D14 logged; band per ADR-007; stage design → build)
+2026-08-07 21:40 · builder · build complete → above_market + valuation/instance-id context per D8–D14; existing suite migrated off the four-flag vocabulary; tsc clean, 55/55 green (stage build → test)
