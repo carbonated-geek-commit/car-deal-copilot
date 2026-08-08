@@ -68,7 +68,7 @@ DealerThread                (the per-deal relationship with ONE dealership)
 ├── messages[]
 └── current_offer
 
-Message                     ← chief-proposed shape, awaiting Corban's ratification
+Message                     (ratified by Corban 2026-08-07)
 ├── channel   (call | sms | email | note)
 ├── direction (in | out | internal)     internal = the buyer's/operator's own record
 ├── author    (dealer | buyer | concierge)   who produced this text — never inferred
@@ -110,13 +110,20 @@ VehicleData                 (decode, recalls, history for one specific car)
 
 **Year drift:** the buyer picks make/model; model year may vary between dealerships. A `year_range` may bound the deal (roughly five years is the expected span), but this is a **soft guide, not a hard rejection** — buyers stay in a sensible range naturally, and a hard rule would block legitimate shopping.
 
-> **⚠ OPEN — escalated to Corban (gate verdict 2026-08-07-3, findings 2–4).** "Make + model" alone is not a priceable entity: no valuation source can price *Honda Accord* without year, trim, mileage, and condition — and all four now vary per thread. Yet `walk_away_number` sits on the **Deal**, so one figure would be applied across cars that may differ by five model years, any trim, any mileage, and new vs. used vs. certified. The gate's charge is that this reproduces the exact incomparability the one-vehicle rule exists to prevent, one level down.
->
-> **Chief's recommended resolution (needs Corban's yes/no):** split the two questions the number is currently doing double duty for.
-> - `Deal.walk_away_number` = **the buyer's budget ceiling** — "I will not spend more than $X." Legitimately deal-level, applies to every thread, and keeps `over_walkaway` exactly as built.
-> - **"Is this a good deal?"** = a **per-instance** verdict: each `VehicleInstance` carries its own `ValuationSnapshot`, and fair-price is judged against *that car's* value, not the deal's.
->
-> Under this split the honesty promise holds — every verdict is still a comparison against one known car — and cross-thread comparison becomes *value-adjusted* rather than raw-price. Until this is settled, no valuation or flag work beyond what Epic 1 already shipped should proceed.
+### Budget ceiling vs. fair price — two different questions *(resolved 2026-08-07)*
+
+"Make + model" alone is not priceable: no valuation source can price *Honda Accord* without year, trim, mileage, and condition, and all four vary per thread. `walk_away_number` therefore cannot be doing both jobs. It is split:
+
+| Question | Scope | Answered against |
+|---|---|---|
+| **"Can I afford it?"** | **Deal-level** — `walk_away_number` is the buyer's budget ceiling, one figure for the whole deal | out-the-door total of any thread's offer (`over_walkaway`, unchanged) |
+| **"Is this a good price?"** | **Per `VehicleInstance`** | that specific car's own `ValuationSnapshot` |
+
+**Consequences:**
+- Every fair-price verdict is a comparison against **one known car**, so the honesty promise the one-vehicle rule protects holds at the level where pricing actually happens.
+- The flag engine gains a **market-value input per instance**; an offer priced above that car's own value is flagged independently of whether it fits the budget. A cheap car can be a bad deal and an expensive one a fair deal — both must be sayable.
+- **Cross-dealership comparison is value-adjusted, not raw-price.** The war room ranks threads by how each offer sits against *its own* car's value, so a $2k-cheaper car with 50k more miles reads as the worse buy, which is the comparison a buyer actually needs.
+- A `ValuationSnapshot` is meaningless without a `VehicleInstance`; a thread with no valuation yet reports fair-price as **unevaluable** (ADR-005 semantics), never as "fine".
 
 *Enforcement:* `target_vehicle.make`/`model` are write-once — settable while the deal is `draft`, immutable once any offer is attached. If the buyer enters a `VehicleInstance` whose make/model does not match the deal's anchor, the app **rejects the entry, highlights that vehicle in red against its VIN, and offers to open a new Deal.** The rejection is a receipt-trail event. VIN is **user-entered and unvalidated at launch** — it is the buyer's own record, not a lookup key (VIN decode validation is backlog).
 
@@ -154,7 +161,7 @@ Consumes an `Offer`, emits `flags[]`:
 - **junk_fee** — add-ons / fees above fair value.
 - **over_walkaway** — total crosses the deal's walk-away number.
 
-Provider-agnostic, pure function of `Offer` + user's qualified-rate + walk-away. Consumer UI foregrounds these; B2B pros may treat them as advisory.
+Provider-agnostic, pure function of `Offer` + user's qualified-rate + walk-away + **the instance's market value** (see "Budget ceiling vs. fair price"). Consumer UI foregrounds these; B2B pros may treat them as advisory. A flag whose required input is absent is **unevaluable**, never silently passed (ADR-005).
 
 ## Integrations — anti-corruption / adapter layer (shared)
 

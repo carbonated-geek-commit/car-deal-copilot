@@ -86,7 +86,7 @@ Credit consent + soft pull → target **make/model** (*or* "scan on the lot") �
 | # | Screen | Purpose |
 |---|--------|---------|
 | W1 | **Dashboard** (Glovebox) | All active deals, budget, pre-qual loans, walk-away. |
-| W2 | **Deal War Room** | Core screen. One make/model, **many dealerships side-by-side** — each column is one dealership's **specific car** (VIN, year, trim, mileage, add-ons) and its offer. Packing/markup/junk-fee flags, walk-away tracker, and per-dealership **who you're working with** (agent → sales manager → finance manager) plus **process step** (information gather → deal negotiation → deal approval → financing → final sale → pickup). Entry is **notes-first** — the buyer types what was said and the extractor parses the offer out of it. A vehicle entered against the wrong make/model is **rejected and shown in red against its VIN**, with a prompt to open a new deal. **Burner inbox** (texts/emails threaded per dealership) lands post-beta. |
+| W2 | **Deal War Room** | Core screen. One make/model, **many dealerships side-by-side** — each column is one dealership's **specific car** (VIN, year, trim, mileage, add-ons) and its offer. Packing/markup/junk-fee flags, **budget-ceiling tracker** (deal-level walk-away) and **fair-price verdict per car** (each offer against *that car's* own value, so ranking is value-adjusted rather than raw-price), plus per-dealership **who you're working with** (agent → sales manager → finance manager) plus **process step** (information gather → deal negotiation → deal approval → financing → final sale → pickup). Entry is **notes-first** — the buyer types what was said and the extractor parses the offer out of it. A vehicle entered against the wrong make/model is **rejected and shown in red against its VIN**, with a prompt to open a new deal. **Burner inbox** (texts/emails threaded per dealership) lands post-beta. |
 | W3 | **Compare & Fine-Print** | Side-by-side vehicles; TCO layer; contract line-item decoder. |
 | W4 | **Vault** | Saved cars, closed deals, ownership tracker — repair ledger + "keep or dump" month for a car you bought. |
 
@@ -120,6 +120,8 @@ This is a **trust relationship, not an evidence chain.** Either the customer tru
 
 Explicitly **not** offered on B2B (that's a car-buyer-for-hire services business, deliberately out of scope).
 
+**Accepted risk — recorded deliberately, not overlooked (Corban, 2026-08-07).** The *winning* deal is independently checkable: the customer signs the dealership's own contract, so its terms can be verified against the trail. The **losing** threads cannot be — their offer histories are operator-authored, and they are exactly what justifies "this one beat the alternatives." The gate raised this (verdict 2026-08-07-3, findings 5–7) and Corban accepted it as a known trade of the trust-relationship model. Mitigations in force: `Message.author` labels every operator-written entry, and the concierge holds **no signing authority**. Revisiting it is a backlog item, not a launch blocker.
+
 *Backlog:* importing external call artifacts (e.g. Zoom transcripts) into a deal — under consideration, not scoped.
 
 **Enforced agent controls** *(resolved 2026-08-07 — enforcement, not trust)*:
@@ -148,3 +150,4 @@ Recorded so they are not silently forgotten, and not planned until promoted.
 4. **VIN decode validation.** At launch VIN is user-entered and unvalidated — the buyer's own record. A decode lookup would let the app verify make/model against the VIN rather than trusting entry.
 5. **Dealership directory batch load.** Dealership records are user-entered at launch; the schema accepts a bulk import later. No Maps/business API is approved (Q13).
 6. **Facebook Marketplace and other private-party comps.** Meta publishes no Marketplace API and scraping violates their terms, so at launch **the buyer sources their own comps and the app points them at good marketplaces to look.** A licensed aggregator remains a future option.
+7. **Concierge verification mechanism.** Accepted risk at launch (see Concierge tier): the losing threads a concierge worked are operator-authored and not independently checkable, so the comparative claim rests partly on trust. A future mechanism could make the alternatives verifiable — dealer-signed quotes, forwarded dealer emails as primary artifacts, or third-party attestation.
