@@ -1,8 +1,8 @@
 ---
 id: T-015
 title: Epic-2 workspace + dependency baseline (db, store-pg, object-store, api)
-stage: build
-owner_agent: designer
+stage: test
+owner_agent: builder
 status: in_progress
 depends_on: []
 file_ownership:
@@ -55,3 +55,4 @@ The monorepo has room for Epic 2 and exactly one place where dependencies enter.
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
 2026-08-07 15:30 · designer · design complete → docs/design/T-015.md; stage design → build; deviations D2 (fourth alias @comms — required or T-017/T-018/T-019 have no legal import path) and D5 (empty TS project is a tsc error; scripts-only ownership amendment requested for T-016..T-019) flagged to lead
+2026-08-07 20:38 · builder · build complete; stage build → test. 8 manifests/tsconfigs created (no src/test/migrations); alias map 8 → 12 in both tsconfig.base.json and vitest.workspace.ts; root typecheck chain widened per D5. One root npm install: pg 8.22.0, @types/pg 8.21.0, @aws-sdk/client-s3 3.1106.0, fastify 5.11.2, zod 4.4.3 — ADR-008's five slots exactly, nothing else; second install byte-identical lockfile. @types/node reached transitively (26.2.0) so the §8-item-3 contingency did not fire. NEW BLOCKER for lead: packages/core/test/spine-invariants.test.ts asserts exactly eight aliases (2 failures) — foreign file, not edited; its owner must widen the expectation to the twelve of design §3.3. Pre-existing red unrelated to T-015 (T-011..T-014 Half-A migration still in flight): tsc fails in packages/core (tests), packages/adapters/valuation, packages/adapters/nhtsa, services/comms; 3 further test failures in packages/core + packages/flag-engine.
