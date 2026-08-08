@@ -1,7 +1,13 @@
 /**
- * Service assembly (design T-009 §2.3): `createCommsService` wires the
- * webhook intake, registers all five consumers (§4.2) on the queue, and
+ * Service assembly (design T-014 §1.4): `createCommsService` wires the webhook
+ * intake and the note intake, registers the THREE consumers on the queue, and
  * exposes the read model.
+ *
+ * Three consumers, down from five: the speech-capture stage — its consumers,
+ * its events, and its port — is gone (D1; specs/01 consent posture, resolved
+ * 2026-08-07; Q14). `alert.dispatch.requested.v1` has no consumer in this service:
+ * dispatch is a later epic, and the durable enqueue is the fact this service
+ * owes.
  *
  * Deterministic seams: `now` (clock) and `new_event_id` (UUID source) are
  * injectable; defaults use the real clock and node:crypto randomUUID.
@@ -15,52 +21,48 @@ import type {
   EventQueue,
   QuarantinedRecord,
   RawPayloadStore,
-  TranscriptStub,
   UnroutedRecord,
 } from './ports.js';
 import { passThroughConsent } from './ports.js';
 import { createWebhookIntake, type WebhookIntake } from './intake.js';
+import { createNoteIntake, type NoteIntake } from './notes.js';
 import { createInboundRouter, INBOUND_ROUTER } from './consumers/inbound-router.js';
-import {
-  createTranscriptionStubWorker,
-  TRANSCRIPTION_STUB_WORKER,
-} from './consumers/transcription-stub-worker.js';
-import { createTranscriptionApply, TRANSCRIPTION_APPLY } from './consumers/transcription-apply.js';
 import { createExtractionWorker, EXTRACTION_WORKER } from './consumers/extraction-worker.js';
 import { createExtractionApply, EXTRACTION_APPLY } from './consumers/extraction-apply.js';
 
-/** §2.2 — operator/read surface over the store. */
+/** Operator/read surface over the store. */
 export interface CommsReadModel {
   /**
    * Assembled @core aggregate (deal + dealer_threads[] + messages[] +
-   * current_offer), returned as a deep snapshot (structuredClone) so no
-   * caller holds mutable references into stored state (append-only posture).
+   * current_offer), returned as a deep snapshot (structuredClone) so no caller
+   * holds mutable references into stored state (append-only posture).
    */
   getDeal(deal_id: string): Deal | undefined;
-  getThread(deal_id: string, dealer_id: string): DealerThread | undefined;
-  /** Operator surfaces — the no-drop holding areas (§5.3, D5). */
+  getThread(deal_id: string, dealership_id: string): DealerThread | undefined;
+  /** The no-drop holding areas. */
   listQuarantined(): readonly QuarantinedRecord[];
   listUnrouted(): readonly UnroutedRecord[];
 }
 
 export interface CommsServiceDeps {
-  telephony: TelephonyAdapter; // fixture adapter in Epic 1 tests
-  email: EmailAdapter; // fixture adapter in Epic 1 tests
-  queue: EventQueue; // §3.1 — InMemoryQueue now, SQS/SNS later
-  store: CommsStore; // §3.2 — InMemoryCommsStore now, Postgres later
-  raw_payloads: RawPayloadStore; // §3.3 — in-memory now, S3 later
-  transcribe: TranscriptStub; // §3.4 (D9)
-  consent?: ConsentHook; // §3.4 (D8) — default: pass-through
+  telephony: TelephonyAdapter; // fixture adapter in tests
+  email: EmailAdapter; // fixture adapter in tests
+  queue: EventQueue; // InMemoryQueue now, managed queue later
+  store: CommsStore; // InMemoryCommsStore now, Postgres later (T-017)
+  raw_payloads: RawPayloadStore; // in-memory now, S3 later (T-018)
+  consent?: ConsentHook; // default: passThroughConsent (D2)
+  max_note_chars?: number; // D13 — in-app input bound; provider text is never capped
   now?: () => IsoTimestamp; // injectable clock (test determinism)
   new_event_id?: () => string; // injectable UUID source (test determinism)
 }
 
 export interface CommsService {
   readonly intake: WebhookIntake;
+  readonly notes: NoteIntake;
   readonly read: CommsReadModel;
 }
 
-/** Registers all five consumers (§4.2) on the queue and returns the surface. */
+/** Registers the three consumers on the queue and returns the surface. */
 export function createCommsService(deps: CommsServiceDeps): CommsService {
   const now = deps.now ?? ((): IsoTimestamp => new Date().toISOString());
   const new_event_id = deps.new_event_id ?? randomUUID;
@@ -76,20 +78,17 @@ export function createCommsService(deps: CommsServiceDeps): CommsService {
     ...seams,
   });
 
+  const notes = createNoteIntake({
+    store,
+    queue,
+    ...(deps.max_note_chars !== undefined ? { max_note_chars: deps.max_note_chars } : {}),
+    ...seams,
+  });
+
   queue.subscribe(
     INBOUND_ROUTER,
     'comms.inbound.received.v1',
     createInboundRouter({ store, queue, consent, ...seams }),
-  );
-  queue.subscribe(
-    TRANSCRIPTION_STUB_WORKER,
-    'comms.transcription.requested.v1',
-    createTranscriptionStubWorker({ store, queue, transcribe: deps.transcribe, ...seams }),
-  );
-  queue.subscribe(
-    TRANSCRIPTION_APPLY,
-    'comms.transcription.completed.v1',
-    createTranscriptionApply({ store, queue, ...seams }),
   );
   queue.subscribe(
     EXTRACTION_WORKER,
@@ -107,13 +106,13 @@ export function createCommsService(deps: CommsServiceDeps): CommsService {
       const deal = store.getDeal(deal_id);
       return deal === undefined ? undefined : structuredClone(deal);
     },
-    getThread: (deal_id, dealer_id) => {
-      const thread = store.getThread(deal_id, dealer_id);
+    getThread: (deal_id, dealership_id) => {
+      const thread = store.getThread(deal_id, dealership_id);
       return thread === undefined ? undefined : structuredClone(thread);
     },
     listQuarantined: () => structuredClone([...store.listQuarantined()]),
     listUnrouted: () => structuredClone([...store.listUnrouted()]),
   };
 
-  return { intake, read };
+  return { intake, notes, read };
 }

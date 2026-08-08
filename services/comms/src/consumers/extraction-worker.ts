@@ -34,7 +34,7 @@ export function createExtractionWorker(deps: ExtractionWorkerDeps): EventHandler
       return { status: 'done' };
     }
 
-    const { deal_id, dealer_id, provider_message_ref, channel, text } = event.payload;
+    const { deal_id, dealership_id, message_ref, channel, text } = event.payload;
 
     let result: ExtractionResult;
     try {
@@ -51,11 +51,11 @@ export function createExtractionWorker(deps: ExtractionWorkerDeps): EventHandler
       type: 'offer.extraction.completed.v1',
       occurred_at: deps.now(),
       deal_id,
-      idempotency_key: `${deal_id}:${provider_message_ref}:extraction-complete`,
+      idempotency_key: `${deal_id}:${message_ref}:extraction-complete`,
       payload: {
         deal_id,
-        dealer_id,
-        provider_message_ref,
+        dealership_id,
+        message_ref,
         // Absent when no offer was found — a valid, terminal outcome (AC/core).
         ...(result.found ? { offer: result.offer } : {}),
       },

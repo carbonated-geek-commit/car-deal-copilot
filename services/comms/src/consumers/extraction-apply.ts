@@ -34,7 +34,7 @@ export function createExtractionApply(deps: ExtractionApplyDeps): EventHandler {
       return { status: 'done' };
     }
 
-    const { deal_id, dealer_id, provider_message_ref, offer } = event.payload;
+    const { deal_id, dealership_id, message_ref, offer } = event.payload;
 
     if (offer === undefined) {
       // No offer in the text — valid terminal outcome; thread unchanged.
@@ -42,7 +42,7 @@ export function createExtractionApply(deps: ExtractionApplyDeps): EventHandler {
       return { status: 'done' };
     }
 
-    const attached = deps.store.attachExtractedOffer(deal_id, provider_message_ref, offer);
+    const attached = deps.store.attachExtractedOffer(deal_id, message_ref, offer);
     if (attached === 'not_found') {
       return { status: 'retry', reason: 'message_row_not_found' };
     }
@@ -52,14 +52,14 @@ export function createExtractionApply(deps: ExtractionApplyDeps): EventHandler {
 
     // Rollup contribution ordered by the contributing Message.timestamp
     // (§6.4) — read back through the correlation index (D3).
-    const row = deps.store.getMessageByRef(deal_id, provider_message_ref);
+    const row = deps.store.getMessageByRef(deal_id, message_ref);
     if (row === undefined) {
       return { status: 'retry', reason: 'message_row_not_found' };
     }
-    deps.store.rollupCurrentOffer(deal_id, dealer_id, {
+    deps.store.rollupCurrentOffer(deal_id, dealership_id, {
       offer,
       at: row.message.timestamp,
-      ref: provider_message_ref,
+      ref: message_ref,
     });
 
     const alert: EventEnvelope<'alert.dispatch.requested.v1', AlertDispatchRequestedV1> = {
@@ -67,11 +67,11 @@ export function createExtractionApply(deps: ExtractionApplyDeps): EventHandler {
       type: 'alert.dispatch.requested.v1',
       occurred_at: deps.now(),
       deal_id,
-      idempotency_key: `${deal_id}:offer_received:${provider_message_ref}`,
+      idempotency_key: `${deal_id}:offer_received:${message_ref}`,
       payload: {
         deal_id,
         kind: 'offer_received',
-        summary: 'Offer terms extracted from an inbound dealer message', // PII-free
+        summary: 'Offer terms extracted from a message on this thread', // PII-free
       },
     };
     const published = await deps.queue.publish(alert);
