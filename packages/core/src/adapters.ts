@@ -12,6 +12,7 @@
  */
 
 import type {
+  CallMeta,
   IdentityRef,
   IsoTimestamp,
   MessageChannel,
@@ -19,7 +20,8 @@ import type {
   RecallRecord,
   ValuationSnapshot,
   VehicleHistorySummary,
-  VehicleSpec,
+  VehicleInstance,
+  VehicleTarget,
   Vin,
   VinDecode,
 } from './domain.js';
@@ -51,14 +53,21 @@ export type AdapterResult<T> =
 
 // ---- outbound-feed adapters (T-003…T-006 implement these) --------------
 
+/**
+ * A valuation is ALWAYS of one specific car. `target` supplies the anchor the
+ * instance deliberately lacks; `instance` supplies the priceable attributes
+ * (year, trim, mileage, condition) specs/00 says no source can price without.
+ * There is no overload accepting a bare make/model.
+ */
 export interface ValuationRequest {
-  vehicle: VehicleSpec | { vin: Vin };
-  mileage?: number;
+  target: VehicleTarget;
+  instance: VehicleInstance;
 }
 
 /** specs/00 "Valuation" — retail/trade-in/wholesale/private-party feeds. */
 export interface ValuationAdapter {
   readonly source: string;
+  /** Implementations stamp `vehicle_instance_id = req.instance.id` on the result. */
   getValuation(req: ValuationRequest): Promise<AdapterResult<ValuationSnapshot>>;
 }
 
@@ -122,18 +131,29 @@ export interface ProviderSendReceipt {
 }
 
 /**
+ * A note is authored in-app and can never arrive from a provider webhook, so a
+ * provider-sourced note is unrepresentable (protects the author-honesty
+ * guarantee — specs/00 "Receipt layer": author "never inferred").
+ */
+export type InboundChannel = Exclude<MessageChannel, 'note'>;
+
+/**
  * Normalized inbound item — the ONLY shape a webhook payload may become.
  * This is what gets wrapped into a `comms.inbound.received.v1` event.
  */
 export interface InboundComms {
-  channel: MessageChannel;
+  channel: InboundChannel;
   /** Which of OUR identities the dealer contacted — routes to the Deal. */
   to_identity: { phone_number?: string; email_alias?: string };
   from: { phone?: string; email?: string };
   /** SMS/email body; absent for calls. */
   body?: string;
-  /** For calls: provider's opaque handle to audio/stream — consumed by transcription, per product policy. */
-  call_ref?: string;
+  /**
+   * For calls: the metadata that gets logged on the thread (specs/00 "log call
+   * metadata (time, direction, party)"). No audio handle exists — Q14/specs/01
+   * removed audio entirely, so there is nothing for such a field to point at.
+   */
+  call_meta?: CallMeta;
   /** Provider's message id — idempotency anchor. */
   provider_message_ref: string;
   received_at: IsoTimestamp;
