@@ -1,9 +1,9 @@
 ---
 id: T-019
 title: HTTP API service foundation — account context, validation, error envelope, authorization seam
-stage: design
+stage: build
 owner_agent: designer
-status: pending
+status: in_progress
 depends_on: [T-014, T-015, T-017, T-018]
 file_ownership:
   - "services/api/src/**"
@@ -53,3 +53,4 @@ mock_only: false
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
+undefined · designer · design published (docs/design/T-019.md); stage design → build. Shape: one account context resolved at the edge behind an AccountContextResolver port (E2 impl is `poc-header`, explicitly NOT auth, so AC-4 holds and E3 swaps one file); one deal-scoped choke point where `DealHandle` carries a module-private unique symbol so every store-touching signature takes the handle instead of a deal_id and the unscoped path does not compile, backed by a boot-time onRoute audit that fails startup for a :deal_id route missing the gate or validation (so T-020's routes are covered without editing them); zod validation at preValidation built from @core's frozen vocabulary arrays, ordered 401 → 400 → gate → handler; one error envelope that also overwrites Fastify's own 400/404/413/415/500 bodies; not-owned returns 404 not 403 so a deal id is not an existence oracle; webhook plane in its own plugin scope with no context, no gate and therefore no store, status taken verbatim from WebhookIngestOutcome. ADR-008 posture: storage plan computed once, no branch exists from a Postgres failure to in-memory, partial object-store config aborts startup. Notes to lead, none blocking: (1) @core exports no DEAL_PATHS/DEAL_STATUSES — declared locally with a compile-time exhaustiveness guard, recommend a @core-owning task add them; (2) webhook + health endpoints live in src/webhooks and src/http, not src/routes (T-020's subtree) — AC-7 is mine, the plane is genuinely different; (3) form-encoded webhooks unsupported (JSON only) because @fastify/formbody is a T-015-only dependency edit — a real gap for the epic that wires Twilio/SES; (4) Postgres-configured-without-object-store is allowed with a warn and reported as raw_payload_durability:"volatile" — ADR-008 gives no authority to require the pair, recommend the lead decide whether it should abort; (5) @store-pg is designed but not built (T-017 is status:blocked on E1) — every signature used is taken verbatim from docs/design/T-017.md §2 and a divergence is a stop, not a shim; in-memory mode has no such dependency. Verified at design time (probe files created, compiled, deleted, nothing committed): fastify + zod + node:process + node:crypto + structuredClone/TextEncoder/setTimeout all typecheck under `npx tsc -p services/api --noEmit` with tsconfig.base's `types: []`, so this service needs NO node-shim.d.ts — T-018's shim rationale inverts here. Not blocked.
