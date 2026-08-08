@@ -22,8 +22,6 @@
  * added — that would be a dependency edit, which ADR-009 reserves for T-015.
  */
 
-import type { FastifyReply, FastifyRequest } from 'fastify';
-
 import type { ApiErrorCode } from '../errors/envelope.js';
 
 export type ApiLogLevelName = 'fatal' | 'error' | 'warn' | 'info' | 'debug';
@@ -72,17 +70,31 @@ export const REDACTED_LOG_PATHS: readonly string[] = [
  * Replacing rather than filtering means a future Fastify default cannot
  * reintroduce a field this list never named.
  */
+/**
+ * The parameter types are deliberately MINIMAL structural shapes rather than
+ * `FastifyRequest`/`FastifyReply`. Pino hands these serializers a reply object
+ * whose `routeOptions` is optional, and naming the full Fastify types here
+ * would couple a log-field decision to a framework generic. Narrow shapes also
+ * make the allow list literal: a field that is not in the parameter type cannot
+ * be logged by a later edit without someone widening it on purpose.
+ */
 export const logSerializers = {
-  req(request: FastifyRequest): Readonly<Record<string, unknown>> {
+  req(request: {
+    id: unknown;
+    method: string;
+    // `| undefined` is explicit because the repo sets `exactOptionalPropertyTypes`
+    // and Fastify's own `routeOptions.url` is `string | undefined`.
+    routeOptions?: { url?: string | undefined } | undefined;
+  }): Record<string, unknown> {
     return {
       request_id: String(request.id),
       method: request.method,
-      // The TEMPLATE (`/deals/:deal_id`), which is a constant, not the URL,
+      // The TEMPLATE (`/deals/:deal_id`), which is a constant — not the URL,
       // which contains ids and a caller-controlled query string.
-      route: request.routeOptions.url ?? 'unmatched',
+      route: request.routeOptions?.url ?? 'unmatched',
     };
   },
-  res(reply: FastifyReply): Readonly<Record<string, unknown>> {
+  res(reply: { statusCode: number }): Record<string, unknown> {
     return { status: reply.statusCode };
   },
 };
