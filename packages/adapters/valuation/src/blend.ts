@@ -14,6 +14,15 @@
  * nothing, which is exactly the incomparability the one-vehicle rule exists to
  * prevent — and it would let another car's `retail` become this car's
  * `above_market` basis (ADR-007).
+ *
+ * The two pieces anchor that discard differently, and deliberately so. The pure
+ * merge has no request to consult, so it anchors on `snapshots[0]`. The
+ * composite DOES hold the request, so it anchors on `req.instance.id` — the car
+ * every source was actually asked about. Anchoring the composite on the head
+ * would be strictly weaker: a source that answered about the wrong car would
+ * become the anchor, evict the honest contributors, and then have its bands
+ * stamped with the requested instance's id (§3.4) — the ADR-007 corruption this
+ * layer exists to absorb, dressed as a valid snapshot.
  */
 
 import type {
@@ -45,7 +54,10 @@ function blendSource(sources: readonly string[]): string {
  * - `vehicle_instance_id` = `snapshots[0].vehicle_instance_id`. Any snapshot
  *   naming a different instance is DISCARDED before merging (D6) and is absent
  *   from `source`. The head always survives, so a non-empty input always yields
- *   a result.
+ *   a result. This function has no request to check against, so the head is the
+ *   only anchor available to it; callers that DO hold a request (the composite
+ *   below) must filter against `req.instance.id` BEFORE calling in, so a
+ *   drifting source can never arrive here as the head.
  * - Each band is taken from the surviving snapshot that supplies it; if more
  *   than one does, the newest `captured_at` wins (ties: earliest input order).
  * - `captured_at` = OLDEST surviving `captured_at`: the blend is only as fresh
@@ -122,10 +134,17 @@ export interface BlendedValuationSources {
  *   present. Missing bands are ABSENT, never zero (ADR-005); `source` names
  *   contributors only, so provenance doubles as the degradation signal and no
  *   side channel is needed.
- * - All fail → one `AdapterError`: a retryable contributor's code wins over a
- *   terminal one; among equals the wired-role order decides (deterministic).
- *   `source` = the blend id; `message` names contributor codes only (log-safe);
- *   `retryable` = OR over contributors.
+ * - A source answers about a `vehicle_instance_id` other than `req.instance.id`
+ *   → that source is DISCARDED (D6, anchored on the request) and counted as a
+ *   `malformed_response` contributor failure. It supplies no band and is absent
+ *   from `source`, so it can neither evict an honest contributor nor have its
+ *   bands relabelled onto the requested car (ADR-007).
+ * - All fail (including "every source answered about another car") → one
+ *   `AdapterError`: a retryable contributor's code wins over a terminal one;
+ *   among equals the wired-role order decides (deterministic). `source` = the
+ *   blend id; `message` names contributor codes only (log-safe); `retryable` =
+ *   OR over contributors. An all-foreign response is therefore a FAILURE, never
+ *   a foreign snapshot wearing this instance's id.
  *
  * Stateless: no internal retry, no caching. "Snapshot + cache" is caller-side
  * (the store layer), so repeated calls are idempotent.
@@ -155,8 +174,32 @@ export function createBlendedValuationAdapter(
       results.forEach((res, i) => {
         const entry = wired[i];
         if (entry === undefined) return; // unreachable; satisfies noUncheckedIndexedAccess
-        if (res.ok) survivors.push(res.value);
-        else failures.push({ role: entry.role, error: res.error });
+        if (!res.ok) {
+          failures.push({ role: entry.role, error: res.error });
+          return;
+        }
+        // D6 anchored on the REQUEST, not on whichever source answered first.
+        // Every wired source was asked about `req.instance`; one that answers
+        // about a different car has drifted, so it is discarded here rather
+        // than being allowed to become the head that everyone else is filtered
+        // against. Anchoring on the head would let a drifting source evict the
+        // honest contributors and then have its bands relabelled onto the
+        // requested instance by the §3.4 stamp below — precisely another car's
+        // retail becoming this car's `above_market` basis (ADR-007).
+        if (res.value.vehicle_instance_id !== req.instance.id) {
+          failures.push({
+            role: entry.role,
+            error: {
+              code: 'malformed_response',
+              retryable: false,
+              source: entry.adapter.source,
+              // Codes and roles only — no id, no band, no provider text (§7.1).
+              message: 'valuation source answered about a different vehicle instance',
+            },
+          });
+          return;
+        }
+        survivors.push(res.value);
       });
 
       if (survivors.length === 0) {
@@ -181,8 +224,10 @@ export function createBlendedValuationAdapter(
       const [first, ...rest] = survivors as [ValuationSnapshot, ...ValuationSnapshot[]];
       const blended = blendSnapshots([first, ...rest]);
 
-      // The composite stamps the requested instance — authoritative, because
-      // every contributor was asked about that same car (§3.4).
+      // The composite stamps the requested instance — authoritative because
+      // every SURVIVOR is now, by the filter above, a snapshot of that same car
+      // (§3.4). The stamp is a relabelling of nothing: it can only ever restate
+      // an id the survivors already agree on.
       return {
         ok: true,
         value: { ...blended, vehicle_instance_id: req.instance.id },

@@ -313,13 +313,13 @@ describe('D6 / AC-1 — a blend is ALWAYS of one specific car', () => {
     }
   });
 
-  it('composite: D6 filters against the HEAD, then §3.4 relabels the result to the requested instance', async () => {
-    // Documented consequence of §3.4 + D6 read together. Reachable ONLY through
-    // a misbehaving adapter that answers about a car it was not asked about —
-    // the test above proves no in-repo source can do that. Recorded here so the
-    // behaviour is pinned rather than latent: if a caching or third-party source
-    // is ever wired into a role, filtering survivors against `req.instance.id`
-    // (rather than against the head) is the change that closes the gap.
+  it('composite: D6 filters against req.instance.id, so a rogue source neither evicts the honest one nor gets relabelled', async () => {
+    // The ADR-007 case the anti-corruption layer exists to absorb: a source
+    // answers about a car it was NOT asked about. It must be discarded against
+    // the REQUEST, not against whichever result happened to arrive first —
+    // otherwise the rogue becomes the head, the honest contributor is dropped
+    // as "foreign", and §3.4 stamps the rogue's retail with this instance's id,
+    // making another car's retail this car's above_market basis.
     const adapter = createBlendedValuationAdapter({
       retail_trade_in: fakeAdapter('rogue-retail', () => ({
         ok: true,
@@ -332,9 +332,75 @@ describe('D6 / AC-1 — a blend is ALWAYS of one specific car', () => {
     });
     const snap = expectOk(await adapter.getValuation(request()));
     expect(snap.vehicle_instance_id).toBe(INSTANCE_ID);
-    // `source` is the honest signal: it names exactly who contributed.
-    expect(snap.source).toBe('blend(rogue-retail)');
-    expect('wholesale' in snap).toBe(false);
+    // The other car's retail never lands here — UNEVALUABLE beats a wrong number.
+    expect(snap.retail).toBeUndefined();
+    expect('retail' in snap).toBe(false);
+    // The honest contributor survives; `source` names exactly who contributed.
+    expect(snap.wholesale).toBe(1_700_000);
+    expect(snap.source).toBe('blend(honest-wholesale)');
+  });
+
+  it('composite: a rogue source is discarded even when it is not the head (order-independent)', async () => {
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: fakeAdapter('honest-retail', (req) => ({
+        ok: true,
+        value: snapshot('honest-retail', { retail: 2_400_000 }, T0, req.instance.id),
+      })),
+      wholesale: fakeAdapter('rogue-wholesale', () => ({
+        ok: true,
+        value: snapshot('rogue-wholesale', { wholesale: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+      })),
+    });
+    const snap = expectOk(await adapter.getValuation(request()));
+    expect(snap.vehicle_instance_id).toBe(INSTANCE_ID);
+    expect(snap.retail).toBe(2_400_000);
+    expect('wholesale' in snap).toBe(false); // absent, never 0 (ADR-005)
+    expect(snap.source).toBe('blend(honest-retail)');
+  });
+
+  it('composite: an ALL-foreign response is a FAILURE, not a foreign snapshot wearing this instance’s id', async () => {
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: fakeAdapter('rogue-a', () => ({
+        ok: true,
+        value: snapshot('rogue-a', { retail: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+      })),
+      wholesale: fakeAdapter('rogue-b', () => ({
+        ok: true,
+        value: snapshot('rogue-b', { wholesale: 8_888_888 }, T0, 'vi-some-third-car'),
+      })),
+    });
+    const res = await adapter.getValuation(request());
+    const err = expectFailure(res, 'malformed_response', 'blend(rogue-a+rogue-b)');
+    // Roles + codes only — no instance id, no band, no provider text (§7.1).
+    expect(err.message).toBe(
+      'all valuation sources failed: retail_trade_in=malformed_response, wholesale=malformed_response',
+    );
+    expect(err.message).not.toContain(OTHER_INSTANCE_ID);
+    expect(err.message).not.toContain('9999999');
+  });
+
+  it('composite: a rogue source counts as a contributor FAILURE alongside a genuine one', async () => {
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: fakeAdapter('rogue-a', () => ({
+        ok: true,
+        value: snapshot('rogue-a', { retail: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+      })),
+      wholesale: fakeAdapter('down-b', () => ({
+        ok: false,
+        error: {
+          code: 'provider_unavailable',
+          retryable: true,
+          source: 'down-b',
+          message: 'simulated outage',
+        },
+      })),
+    });
+    const res = await adapter.getValuation(request());
+    // A retryable contributor's code wins over a terminal one (§7.2).
+    const err = expectFailure(res, 'provider_unavailable', 'blend(rogue-a+down-b)');
+    expect(err.message).toBe(
+      'all valuation sources failed: retail_trade_in=malformed_response, wholesale=provider_unavailable',
+    );
   });
 
   it('the composite stamps req.instance.id — the requested car is authoritative (§3.4)', async () => {
