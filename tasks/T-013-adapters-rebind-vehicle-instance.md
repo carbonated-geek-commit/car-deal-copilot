@@ -1,9 +1,9 @@
 ---
 id: T-013
 title: Adapter layer rebound to VehicleInstance (valuation, NHTSA, vehicle-history, credit-prequal)
-stage: design
+stage: build
 owner_agent: designer
-status: pending
+status: designed
 depends_on: [T-010]
 file_ownership:
   - "packages/adapters/**"
@@ -50,3 +50,4 @@ All four adapter packages — `valuation` (KBB-mock, Manheim-mock, blend), `nhts
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half A: v0.5 domain migration)
+2026-08-07 · designer · design complete — docs/design/T-013.md (13 interpretive calls D1–D13; valuation + nhtsa carry the code change, vehicle-history + credit-prequal are verification-only); stage design → build
