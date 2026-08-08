@@ -35,3 +35,22 @@ declare module 'node:path' {
 declare module 'node:url' {
   export function fileURLToPath(url: string): string;
 }
+
+/** Used only by the AC-17 gate (typecheck.test.ts), which shells out to `tsc`. */
+declare module 'node:child_process' {
+  export interface SpawnSyncResult {
+    status: number | null;
+    stdout: string;
+    stderr: string;
+  }
+  export function spawnSync(
+    command: string,
+    args: string[],
+    options: { cwd?: string; encoding: 'utf8' },
+  ): SpawnSyncResult;
+}
+
+/** Only the member the AC-17 gate touches. */
+declare const process: {
+  execPath: string;
+};
