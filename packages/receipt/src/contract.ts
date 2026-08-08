@@ -49,7 +49,28 @@ interface ReceiptEntryInputBase {
   direction: MessageDirection;
   /** When the underlying communication happened (maps to Message.timestamp). */
   occurred_at: IsoTimestamp;
-  /** Idempotency anchor for at-least-once writers. Convention: event idempotency_key. */
+  /**
+   * Idempotency anchor for at-least-once writers. Convention: event
+   * idempotency_key.
+   *
+   * BINDING (inherited by the durable implementation, T-017): a value is an
+   * anchor only when it is a **non-blank string**. Any other supplied value —
+   * `''`, whitespace-only, `null`, or a non-string that crossed the JS/JSON
+   * boundary the types cannot police — means *no anchor was supplied*: it is
+   * neither stored nor indexed, and the entry appends normally. It is NEVER
+   * treated as a real anchor, because two unrelated events carrying the same
+   * degenerate value would collide and the second would be absorbed as a
+   * redelivery — a receipt entry silently dropped from an append-only trail
+   * (design §4.6 rule 3: "never silently dropped … losing one falsifies the
+   * trail"). D10's first-write-wins is scoped to a REDELIVERY of the same
+   * event; a degenerate key does not identify an event.
+   *
+   * The safe failure direction for a trail whose value is completeness is a
+   * possible duplicate (honest, timestamped, seq'd, visible), never a loss.
+   * This is why a degenerate key is not rejected the way a blank `body` is:
+   * `body` is load-bearing content, `dedupe_key` is optional metadata whose
+   * absence is legal, and `null` is exactly how JSON spells that absence.
+   */
   dedupe_key?: string;
 }
 

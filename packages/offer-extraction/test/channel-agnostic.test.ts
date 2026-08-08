@@ -229,7 +229,11 @@ describe('profile map is exhaustive and normalization is total (D1, D3)', () => 
 
   it('normalizeText is total over every profile — any string in, a string out, never a throw', () => {
     const profiles: readonly NormalizationProfile[] = ['plain', 'email', 'spoken'];
-    const inputs = ['', '   \n\t ', ' �[31m!!!', 'On Tue someone wrote:\n> $9,999', '9'.repeat(5000)];
+    // Control characters are written as ESCAPES, never as raw bytes: a literal
+    // 0x00 in this file makes `grep` classify it as binary, which suppresses the
+    // matching lines of the transcript-token gate (§1.3 / §5) and would hide a
+    // real regression behind a bare "Binary file ... matches".
+    const inputs = ['', '   \n\t ', '\u0000\u001b[31m!!!', 'On Tue someone wrote:\n> $9,999', '9'.repeat(5000)];
     for (const profile of profiles) {
       for (const raw of inputs) {
         let out: string | undefined;

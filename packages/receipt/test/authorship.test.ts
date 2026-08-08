@@ -537,6 +537,72 @@ describe('the store surface offers no update or delete path in any form (AC-8)',
     }
   });
 
+  /**
+   * The blank case above is the string-shaped half. The JS/JSON boundary that
+   * §4.6 rule 2 actually names ("writers set dedupe_key from the event
+   * envelope's idempotency_key") produces the other half: an envelope with no
+   * idempotency_key serializes to `{"dedupe_key": null}`, and a hand-rolled
+   * caller can hand over any type at all. None of these identify an EVENT, so
+   * none may act as an idempotency anchor — otherwise two unrelated entries
+   * collide on it and the second never enters the trail.
+   *
+   * Remedy-agnostic in the same way: reject, or treat as absent and append.
+   * The one outcome the trail cannot survive is the silent swallow.
+   */
+  it('a non-string dedupe_key never silently swallows a distinct entry (§4.6 rules 2-3)', async () => {
+    const degenerate: readonly unknown[] = [null, 0, false, 42, {}, []];
+    for (const key of degenerate) {
+      const store = createInMemoryReceiptStore(clock);
+      const label = `dedupe_key ${JSON.stringify(key) ?? String(key)}`;
+      const first = await store.append(
+        'b',
+        sms({ dedupe_key: key as string, body: 'FIRST message' }),
+      );
+      const second = await store.append(
+        'b',
+        sms({ dedupe_key: key as string, body: 'SECOND, unrelated message' }),
+      );
+
+      if (first.ok && second.ok) {
+        expect(second.value.deduplicated, `${label}: a distinct entry was absorbed`).toBe(false);
+        const bodies = unwrap(await store.read('b')).map((e) =>
+          e.kind === 'sms' ? e.body : undefined,
+        );
+        expect(bodies, label).toEqual(['FIRST message', 'SECOND, unrelated message']);
+      } else {
+        const error = first.ok ? unwrapErr(second) : unwrapErr(first);
+        expect(error.code, label).toBe('invalid_input');
+        expect(error.retryable, label).toBe(false);
+      }
+    }
+  });
+
+  /**
+   * The counterweight: refusing to honour degenerate keys must not weaken the
+   * idempotency mechanism itself. A real anchor still absorbs its redelivery
+   * (D10), and a degenerate value is never persisted onto the entry as an
+   * anchor it is not — so a durable implementation (T-017) indexing
+   * `entry.dedupe_key` inherits the same collision-free set.
+   */
+  it('a real dedupe_key still dedupes, and a degenerate one is never stored as an anchor', async () => {
+    const store = createInMemoryReceiptStore(clock);
+    const real = unwrap(await store.append('b', sms({ dedupe_key: 'evt-9', body: 'once' })));
+    const redelivered = unwrap(await store.append('b', sms({ dedupe_key: 'evt-9', body: 'once' })));
+    expect(redelivered.deduplicated).toBe(true);
+    expect(redelivered.entry.seq).toBe(real.entry.seq);
+
+    const blankKeyed = await store.append('b', sms({ dedupe_key: '   ', body: 'distinct' }));
+    if (blankKeyed.ok) {
+      expect(blankKeyed.value.deduplicated).toBe(false);
+      expect(blankKeyed.value.entry.dedupe_key).toBeUndefined();
+    } else {
+      expect(blankKeyed.error.code).toBe('invalid_input');
+    }
+    expect(unwrap(await store.read('b')).map((e) => e.seq)).toEqual(
+      blankKeyed.ok ? [1, 2] : [1],
+    );
+  });
+
   it('a rejected append leaves the existing trail byte-identical (failed writes never disturb history)', async () => {
     const store = createInMemoryReceiptStore(clock);
     await store.append('b', sms());

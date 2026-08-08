@@ -11,6 +11,12 @@
  *   entry with `deduplicated: true` — no new entry, no mutation, first write
  *   wins even when the redelivered payload differs (D10). Dedupe never
  *   becomes upsert; the interface deliberately offers no overwrite.
+ * - A `dedupe_key` is an anchor ONLY when it is a non-blank string. Any other
+ *   supplied value ('' / whitespace / null / non-string from the JS/JSON
+ *   boundary) means no anchor was supplied: it is not indexed, not stored, and
+ *   the entry appends. Treating a degenerate value as an anchor would collide
+ *   two UNRELATED events and silently swallow the second — a receipt entry
+ *   dropped from an append-only trail, which §4.6 rule 3 forbids outright.
  * - `read` returns a fresh array each call (the array is the caller's; the
  *   entries are frozen singletons), sorted occurred_at asc, seq tiebreak.
  *   Unknown bundle → `{ ok: true, value: [] }`.
@@ -75,6 +81,20 @@ function invalidInput(message: string): ReceiptResult<never> {
 
 function isBlank(value: unknown): boolean {
   return typeof value !== 'string' || value.trim() === '';
+}
+
+/**
+ * A dedupe_key counts as an idempotency anchor only when it is a non-blank
+ * string (contract.ts, `dedupe_key`). Everything else — `''`, whitespace-only,
+ * `null`, or any non-string that crossed the JS/JSON boundary — reads as "no
+ * anchor supplied". Deliberately NOT an `invalid_input` rejection: `dedupe_key`
+ * is optional metadata whose absence is legal (unlike `body`, which is
+ * load-bearing content), `null` is how JSON spells that absence, and the safe
+ * failure direction for an append-only trail is a possible duplicate, never a
+ * dropped entry (§4.6 rule 3).
+ */
+function isDedupeAnchor(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
 }
 
 function isAuthor(value: unknown): value is MessageAuthor {
@@ -171,7 +191,9 @@ function copyInput(input: ReceiptEntryInput): ReceiptEntryInput {
   const base = {
     author: input.author,
     occurred_at: input.occurred_at,
-    ...(input.dedupe_key !== undefined ? { dedupe_key: input.dedupe_key } : {}),
+    // Only a real anchor is carried onto the stored entry; a degenerate value
+    // is dropped rather than persisted as an anchor it is not.
+    ...(isDedupeAnchor(input.dedupe_key) ? { dedupe_key: input.dedupe_key } : {}),
   };
   switch (input.kind) {
     case 'note':
@@ -268,9 +290,12 @@ export function createInMemoryReceiptStore(clock: ReceiptClock = defaultClock): 
       }
 
       // Idempotent append (D10): a dedupe hit returns the existing frozen entry
-      // untouched — dedupe never becomes upsert.
-      if (input.dedupe_key !== undefined) {
-        const existing = bundle.byDedupeKey.get(input.dedupe_key);
+      // untouched — dedupe never becomes upsert. Only a non-blank string is an
+      // anchor; a degenerate value is treated as "no key supplied" so two
+      // UNRELATED events can never collide on it and lose the second entry.
+      const dedupeKey = isDedupeAnchor(input.dedupe_key) ? input.dedupe_key : undefined;
+      if (dedupeKey !== undefined) {
+        const existing = bundle.byDedupeKey.get(dedupeKey);
         if (existing !== undefined) {
           return { ok: true, value: { entry: existing, deduplicated: true } };
         }
