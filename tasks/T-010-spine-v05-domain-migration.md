@@ -1,8 +1,8 @@
 ---
 id: T-010
 title: Spine v0.5 domain migration (packages/core) — VehicleTarget/VehicleInstance, Dealership, ratified Message
-stage: build
-owner_agent: builder
+stage: test
+owner_agent: tester
 status: in_progress
 depends_on: []
 file_ownership:
@@ -62,3 +62,4 @@ mock_only: false
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half A: v0.5 domain migration)
 undefined · designer · design doc published (docs/design/T-010.md): full v0.5 type surface (VehicleTarget/VehicleInstance split, Dealership + DealershipContact tenancy split, ratified Message, instance-bound ValuationSnapshot/VehicleData, above_market, transcription contracts removed), delete-not-deprecate checklist, per-operation error/idempotency tables, 14 invariant touchpoints, AC 1-17 trace; interpretive calls D1-D15 logged; two resolved deviations noted (D4 optional vehicle_instance/working_with, D7 reliability? omitted); stage design → build
+undefined · builder · v0.5 spine implemented in packages/core/src (domain.ts, adapters.ts, events.ts) exactly per docs/design/T-010.md: VehicleTarget/VehicleInstance split + VehicleTargetDraft + isTargetVehicleLocked, Deal.resolved_vehicle removed, Dealership/DealershipContact tenancy split, DealerThread v0.5 fields, ratified Message (no recording_url, no transcript), instance-bound ValuationSnapshot/VehicleData with flat bands + captured_at, above_market flag, D13 enum vocabularies, ValuationRequest {target,instance}, InboundChannel excludes note, InboundComms.call_meta?, transcription contracts deleted, dealership_id/message_ref rename, alert kind call_logged. src typechecks standalone; packages/core/test/** is still v0.4-shaped and is left for the tester per design §7. stage build → test
