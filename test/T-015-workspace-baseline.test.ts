@@ -607,13 +607,25 @@ describe('kit mandates the baseline must not make un-implementable', () => {
   });
 
   it('no credential value and no .env file entered the repo (§3.5, CLAUDE.md approved integrations)', () => {
-    for (const f of ['.env', '.env.local', '.env.development', '.env.production']) {
-      expect(existsSync(at(f)), `${f} must not exist`).toBe(false);
-      for (const { dir } of NEW_MEMBERS) {
-        expect(existsSync(at(dir, f)), `${dir}/${f} must not exist`).toBe(false);
+    // Scan for *any* dotenv-shaped file rather than a fixed list of four names:
+    // .env.staging, .env.ci, .env.local.bak and friends carry credentials just as
+    // well, and a name-list guard waves them through. (.env.example / .env.sample
+    // are templates by convention and carry no value, but the secret-assignment
+    // scan below still reads them.)
+    const secretAssignment = /(AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|DATABASE_URL)\s*=\s*['"]?\S+/;
+    const dotenvShaped = (d: string) =>
+      (existsSync(d) ? readdirSync(d, { withFileTypes: true }) : [])
+        .filter((e) => e.isFile() && /^\.env(?:$|\.)/.test(e.name))
+        .map((e) => e.name);
+
+    for (const dir of ['.', ...NEW_MEMBERS.map((m) => m.dir)]) {
+      const present = dotenvShaped(at(dir));
+      const disallowed = present.filter((n) => !/^\.env\.(example|sample|template)$/.test(n));
+      expect(disallowed, `${dir} must hold no .env file`).toEqual([]);
+      for (const name of present) {
+        expect(secretAssignment.test(readText(dir, name)), `${dir}/${name}`).toBe(false);
       }
     }
-    const secretAssignment = /(AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|DATABASE_URL)\s*=\s*['"]?\S+/;
     for (const dir of ALL_MEMBERS) {
       expect(secretAssignment.test(readText(dir, 'package.json')), dir).toBe(false);
     }
@@ -645,10 +657,49 @@ describe('ADR-008 — the Postgres path is exercised only when DATABASE_URL is s
     20_000,
   );
 
-  it('when DATABASE_URL is absent the DB case is reported SKIPPED, and nothing here fakes a connection', () => {
-    // The assertion that matters is structural: this suite opens no connection on
-    // the default path. If DATABASE_URL *is* set, the case above ran for real.
-    expect(hasDb || process.env.DATABASE_URL === undefined).toBe(true);
+  it('the only load of pg in this suite is inside the DATABASE_URL-guarded case, and nothing fakes it', () => {
+    // ADR-008 says a DB-dependent case is SKIPPED when DATABASE_URL is unset —
+    // never reported as passed. The skip itself is carried by `it.skipIf(!hasDb)`
+    // above; what this case proves is the honesty half of that rule, which the
+    // skip alone cannot: that the default (no-DATABASE_URL) path neither opens a
+    // connection nor substitutes a fake one for it. So it reads this file's own
+    // source and asserts structurally where pg may be loaded.
+    const selfSource = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+
+    // 1. No module-scope import of pg: a static import would load the driver on
+    //    every run, including the skipped one.
+    expect(/^\s*import\b[^\n]*\bfrom\s*['"]pg['"]/m.test(selfSource), 'static pg import').toBe(
+      false,
+    );
+
+    // 2. No test double stands in for a real connection — a mocked pg would let a
+    //    "DB test" go green with no database behind it, the exact failure ADR-008
+    //    forbids.
+    expect(/\bvi\s*\.\s*mock\s*\(\s*['"]pg['"]/.test(selfSource), 'mocked pg').toBe(false);
+
+    // 3. Every dynamic load of pg sits inside the guarded case — i.e. between
+    //    `it.skipIf(!hasDb)(` and the start of the next case.
+    const guardStart = selfSource.indexOf('it.skipIf(!hasDb)(');
+    expect(guardStart, 'the DATABASE_URL guard must exist').toBeGreaterThan(-1);
+    const guardEnd = selfSource.indexOf('\n  it(', guardStart);
+    expect(guardEnd, 'the guarded case must be closed by a following case').toBeGreaterThan(
+      guardStart,
+    );
+
+    const loads = [
+      ...selfSource.matchAll(/(?:\bimport|\brequire)\s*\(\s*['"]pg['"]\s*\)/g),
+    ].map((m) => m.index ?? -1);
+    expect(loads.length, 'the guarded case must actually load pg').toBe(1);
+    for (const i of loads) {
+      expect(i > guardStart && i < guardEnd, `pg loaded outside the guard at offset ${i}`).toBe(
+        true,
+      );
+    }
+
+    // 4. And the guarded case is the only place a Pool is constructed.
+    const pools = [...selfSource.matchAll(/new\s+pg\s*\.\s*Pool\s*\(/g)].map((m) => m.index ?? -1);
+    expect(pools.length).toBe(1);
+    expect(pools[0] > guardStart && pools[0] < guardEnd).toBe(true);
   });
 });
 
