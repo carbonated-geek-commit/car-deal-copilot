@@ -2,3 +2,12 @@
 __pycache__/
 *.pyc
 node_modules/
+
+# Secrets — never commit. T-016/T-018/T-020 configure real Postgres and
+# S3-compatible endpoints via these; the credentials themselves stay out of git
+# (ADR-008 environment contract; CLAUDE.md approved-integrations rule).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
