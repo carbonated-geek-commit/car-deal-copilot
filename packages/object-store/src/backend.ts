@@ -36,11 +36,18 @@ export interface BackendPutInput {
   metadata: BackendMetadata;
 }
 
+/**
+ * What a backend RETRIEVED — never more. Every field a provider may omit is
+ * optional, so a backend cannot substitute a plausible-looking default for
+ * something it did not receive (docs/design/T-018.md §5.6; ADR-005: a missing
+ * required input is unevaluable, never zero). The artifact store turns an
+ * absent field into `malformed_response`, which is the only honest answer.
+ */
 export interface BackendHead {
-  byte_length: number;
+  byte_length?: number;
   content_type?: string;
   metadata: BackendMetadata;
-  stored_at: IsoTimestamp;
+  stored_at?: IsoTimestamp;
 }
 
 export interface BackendObject extends BackendHead {
@@ -49,8 +56,8 @@ export interface BackendObject extends BackendHead {
 
 export interface BackendListItem {
   key: string;
-  byte_length: number;
-  stored_at: IsoTimestamp;
+  byte_length?: number;
+  stored_at?: IsoTimestamp;
 }
 
 export interface BackendListPage {

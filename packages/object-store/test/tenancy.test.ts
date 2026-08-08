@@ -213,3 +213,65 @@ describe('an unscoped read is inexpressible', () => {
     expectErr(await store.list('../'), 'invalid_input');
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-018 fixer — §4.4 says a cross-account probe cannot confirm that an object
+// exists. Equal codes are not enough if T-020 surfaces `AdapterError.message`
+// to an HTTP client: the WORDING has to be identical too, and it has to stay
+// identical whatever a provider called its own miss.
+// ---------------------------------------------------------------------------
+
+describe('a cross-account refusal is indistinguishable from a genuine miss', () => {
+  it('returns the identical error — code, retryable, source and message — for both', async () => {
+    const { store, ref } = await seeded();
+    const foreign = expectErr(await store.get(INTRUDER, ref), 'not_found');
+
+    // A ref inside the intruder's OWN account that was never stored.
+    const missRef = `acct/${INTRUDER}/${DEAL}/dossier/${sha256Hex(PDF_BYTES_ALT)}`;
+    const miss = expectErr(await store.get(INTRUDER, missRef), 'not_found');
+    expect(foreign).toEqual(miss);
+
+    const foreignHead = expectErr(await store.head(INTRUDER, ref), 'not_found');
+    const missHead = expectErr(await store.head(INTRUDER, missRef), 'not_found');
+    expect(foreignHead).toEqual(missHead);
+  });
+
+  it('does not let a backend\'s own wording for a miss reach the caller', async () => {
+    // A provider that says "NoSuchKey in bucket prod-artifacts" must not be
+    // able to tell a prober anything the local refusal would not have.
+    const backend = stubBackend({
+      get: async () => ({
+        ok: false,
+        error: {
+          code: 'not_found' as const,
+          retryable: false,
+          source: 'stub-backend',
+          message: 'get failed: NoSuchKey in bucket prod-artifacts',
+        },
+      }),
+      head: async () => ({
+        ok: false,
+        error: {
+          code: 'not_found' as const,
+          retryable: false,
+          source: 'stub-backend',
+          message: 'head failed: NoSuchKey in bucket prod-artifacts',
+        },
+      }),
+    });
+    const store = createObjectStoreOverBackend(backend);
+    const ownRef = `acct/${OWNER}/${DEAL}/dossier/${sha256Hex(PDF_BYTES)}`;
+    const foreignRef = `acct/${INTRUDER}/${DEAL}/dossier/${sha256Hex(PDF_BYTES)}`;
+
+    const miss = expectErr(await store.get(OWNER, ownRef), 'not_found');
+    const foreign = expectErr(await store.get(OWNER, foreignRef), 'not_found');
+    expect(miss.message).toBe(foreign.message);
+    expect(miss.message).not.toContain('NoSuchKey');
+    expect(miss.message).not.toContain('prod-artifacts');
+
+    const missHead = expectErr(await store.head(OWNER, ownRef), 'not_found');
+    const foreignHead = expectErr(await store.head(OWNER, foreignRef), 'not_found');
+    expect(missHead.message).toBe(foreignHead.message);
+    expect(missHead.message).not.toContain('NoSuchKey');
+  });
+});

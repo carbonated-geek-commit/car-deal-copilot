@@ -645,3 +645,169 @@ describe('logging (§4.8) — correlate, never a capability and never content', 
     expect(event?.message).toContain('audio');
   });
 });
+
+// ---------------------------------------------------------------------------
+// T-018 fixer — regressions for the three defects the verifier confirmed.
+// Each one asserts the GUARANTEE that was broken, not the shape of the patch.
+// ---------------------------------------------------------------------------
+
+describe('an untyped caller cannot crash the boundary (@core AdapterResult)', () => {
+  // The T-019 HTTP/JSON edge parses whatever a client sent, so `kind` reaches
+  // this package as an arbitrary string. Every such value must come back as an
+  // `invalid_input` VALUE — an adapter never throws across the boundary.
+  it.each([
+    ['an unknown literal', 'recording'],
+    ['an empty string', ''],
+    ['a traversal segment', '../dossier'],
+    ['a case variant of a real kind', 'DOSSIER'],
+  ])('refuses %s in kind as a value, for every content type', async (_label, kind) => {
+    const store = memoryStore();
+    for (const content_type of ['application/pdf', 'text/plain', 'audio/mpeg']) {
+      const result = await store.put({
+        account_id: ACCOUNT,
+        deal_id: DEAL,
+        // deliberately unsound: this is the untyped edge, reproduced.
+        kind: kind as 'dossier',
+        content_type,
+        bytes: PDF_BYTES,
+      });
+      expect(result.ok).toBe(false);
+      expectErr(result, 'invalid_input');
+    }
+    expect(store.size()).toBe(0);
+  });
+
+  it('never writes when the kind is refused', async () => {
+    const backend = stubBackend();
+    const store = createObjectStoreOverBackend(backend);
+    expectErr(
+      await store.put({
+        account_id: ACCOUNT,
+        deal_id: DEAL,
+        kind: 'recording' as 'dossier',
+        content_type: 'application/pdf',
+        bytes: PDF_BYTES,
+      }),
+      'invalid_input',
+    );
+    expect(backend.calls).toHaveLength(0);
+  });
+});
+
+describe('put reports what is STORED, never what was requested (§5.6, AC-5)', () => {
+  // text/plain and text/csv are both allowlisted for `document` and share the
+  // same magic requirement (no NUL byte), so the same bytes can be re-put under
+  // either label and reach the already_present branch. What comes back must be
+  // the stored label: a caller persisting PutResult.metadata into a Postgres
+  // row would otherwise serve the wrong Content-Type permanently.
+  it.each([
+    ['text/csv', 'text/plain'],
+    ['text/plain', 'text/csv'],
+  ])('re-putting identical bytes stored as %s under the label %s reports the stored one', async (
+    stored_type,
+    relabelled,
+  ) => {
+    const store = memoryStore();
+    const first = expectOk(
+      await store.put({
+        account_id: ACCOUNT,
+        deal_id: DEAL,
+        kind: 'document',
+        content_type: stored_type,
+        bytes: CSV_BYTES,
+      }),
+    );
+    const second = expectOk(
+      await store.put({
+        account_id: ACCOUNT,
+        deal_id: DEAL,
+        kind: 'document',
+        content_type: relabelled,
+        bytes: CSV_BYTES,
+      }),
+    );
+    expect(second.outcome).toBe('already_present');
+    expect(second.metadata.content_type).toBe(stored_type);
+
+    // Every read agrees with it, and with the first put.
+    const headed = expectOk(await store.head(ACCOUNT, first.ref));
+    const got = expectOk(await store.get(ACCOUNT, first.ref));
+    expect(headed.content_type).toBe(stored_type);
+    expect(got.metadata.content_type).toBe(stored_type);
+    expect(second.metadata).toEqual(headed);
+    expect(store.size()).toBe(1);
+  });
+
+  it('reports the RETRIEVED timestamp on the already_present branch, not a fresh reading of the clock', async () => {
+    // The clock advances a second per reading, so a re-stamped `stored_at`
+    // would be visibly later than the one the object actually carries.
+    const store = createInMemoryObjectStore({ clock: fixedClock(Date.parse('2026-08-07T12:00:00.000Z'), 1000) });
+    const first = expectOk(
+      await store.put({ account_id: ACCOUNT, deal_id: DEAL, kind: 'dossier', content_type: 'application/pdf', bytes: PDF_BYTES }),
+    );
+    const stored = expectOk(await store.head(ACCOUNT, first.ref));
+    const second = expectOk(
+      await store.put({ account_id: ACCOUNT, deal_id: DEAL, kind: 'dossier', content_type: 'application/pdf', bytes: PDF_BYTES }),
+    );
+    expect(second.outcome).toBe('already_present');
+    expect(second.metadata.stored_at).toBe(stored.stored_at);
+    expect(second.metadata).toEqual(stored);
+  });
+});
+
+describe('a field the backend did not retrieve is unevaluable, never zero (§5.6, ADR-005)', () => {
+  const REF = `acct/${ACCOUNT}/${DEAL}/dossier/${sha256Hex(PDF_BYTES)}`;
+  const FULL = {
+    byte_length: PDF_BYTES.byteLength,
+    content_type: 'application/pdf',
+    metadata: {},
+    stored_at: '2026-08-07T12:00:00.000Z',
+  };
+
+  it.each([
+    ['byte_length', 'byte length'],
+    ['stored_at', 'stored_at'],
+  ])('raises malformed_response on get/head when the provider omits %s', async (field, phrase) => {
+    const head = { ...FULL };
+    delete (head as Record<string, unknown>)[field];
+    const backend = stubBackend({
+      head: async () => ({ ok: true, value: head }),
+      get: async () => ({ ok: true, value: { ...head, bytes: PDF_BYTES } }),
+    });
+    const store = createObjectStoreOverBackend(backend);
+    const error = expectErr(await store.head(ACCOUNT, REF), 'malformed_response');
+    expect(error.message).toContain(phrase);
+    expectErr(await store.get(ACCOUNT, REF), 'malformed_response');
+  });
+
+  it.each(['byte_length', 'stored_at'])(
+    'refuses the already_present branch rather than inventing %s',
+    async (field) => {
+      const head = { ...FULL };
+      delete (head as Record<string, unknown>)[field];
+      const backend = stubBackend({ head: async () => ({ ok: true, value: head }) });
+      const store = createObjectStoreOverBackend(backend);
+      expectErr(
+        await store.put({ account_id: ACCOUNT, deal_id: DEAL, kind: 'dossier', content_type: 'application/pdf', bytes: PDF_BYTES }),
+        'malformed_response',
+      );
+      // And it did NOT fall through to a write.
+      expect(backend.calls.filter((c) => c.startsWith('put:'))).toHaveLength(0);
+    },
+  );
+
+  it.each(['byte_length', 'stored_at'])('raises malformed_response on list when %s is absent', async (field) => {
+    const entry: Record<string, unknown> = {
+      key: REF,
+      byte_length: PDF_BYTES.byteLength,
+      stored_at: '2026-08-07T12:00:00.000Z',
+    };
+    delete entry[field];
+    const backend = stubBackend({
+      list: async () => ({ ok: true, value: { items: [entry as { key: string }], truncated: false } }),
+    });
+    const store = createObjectStoreOverBackend(backend);
+    const error = expectErr(await store.list(ACCOUNT), 'malformed_response');
+    expect(error.retryable).toBe(false);
+  });
+});

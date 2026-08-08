@@ -31,6 +31,7 @@ import {
 import type { IsoTimestamp } from '@core';
 import type {
   BackendHead,
+  BackendListItem,
   BackendListOptions,
   BackendListPage,
   BackendMetadata,
@@ -46,10 +47,7 @@ export const S3_SOURCE = 's3-object-store';
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 
-const defaultClock = (): IsoTimestamp => new Date().toISOString();
-
 export function createS3Backend(config: ObjectStoreConfig): ObjectBackend {
-  const clock = config.clock ?? defaultClock;
   const bucket = config.bucket;
   const checksums = config.checksums !== false;
 
@@ -102,10 +100,14 @@ export function createS3Backend(config: ObjectStoreConfig): ObjectBackend {
           ok: true,
           value: {
             bytes,
+            // Measured from the body we actually received — retrieved, not
+            // guessed. `stored_at` is not: only the provider knows it.
             byte_length: bytes.byteLength,
             ...(response.ContentType !== undefined ? { content_type: response.ContentType } : {}),
             metadata: normalizeMetadata(response.Metadata),
-            stored_at: toIso(response.LastModified, clock),
+            ...(response.LastModified !== undefined
+              ? { stored_at: toIso(response.LastModified) }
+              : {}),
           },
         };
       } catch (err) {
@@ -119,10 +121,18 @@ export function createS3Backend(config: ObjectStoreConfig): ObjectBackend {
         return {
           ok: true,
           value: {
-            byte_length: response.ContentLength ?? 0,
+            // §5.6 / ADR-005: a field the provider omitted is OMITTED here.
+            // A fabricated `0` length or a `stored_at` of "now" would be a
+            // value this package invented rather than retrieved, and the
+            // artifact store would have no way to tell it from a real one.
+            ...(response.ContentLength !== undefined
+              ? { byte_length: response.ContentLength }
+              : {}),
             ...(response.ContentType !== undefined ? { content_type: response.ContentType } : {}),
             metadata: normalizeMetadata(response.Metadata),
-            stored_at: toIso(response.LastModified, clock),
+            ...(response.LastModified !== undefined
+              ? { stored_at: toIso(response.LastModified) }
+              : {}),
           },
         };
       } catch (err) {
@@ -140,13 +150,13 @@ export function createS3Backend(config: ObjectStoreConfig): ObjectBackend {
             ...(options.cursor !== undefined ? { ContinuationToken: options.cursor } : {}),
           }),
         );
-        const items: { key: string; byte_length: number; stored_at: IsoTimestamp }[] = [];
+        const items: BackendListItem[] = [];
         for (const entry of response.Contents ?? []) {
           if (entry.Key === undefined) continue;
           items.push({
             key: entry.Key,
-            byte_length: entry.Size ?? 0,
-            stored_at: toIso(entry.LastModified, clock),
+            ...(entry.Size !== undefined ? { byte_length: entry.Size } : {}),
+            ...(entry.LastModified !== undefined ? { stored_at: toIso(entry.LastModified) } : {}),
           });
         }
         const truncated = response.IsTruncated === true;
@@ -174,6 +184,6 @@ function normalizeMetadata(metadata: Record<string, string> | undefined): Backen
   return out;
 }
 
-function toIso(value: Date | undefined, clock: () => IsoTimestamp): IsoTimestamp {
-  return value === undefined ? clock() : value.toISOString();
+function toIso(value: Date): IsoTimestamp {
+  return value.toISOString();
 }

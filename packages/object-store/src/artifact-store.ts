@@ -52,6 +52,7 @@ import { checkContentPolicy, DEFAULT_MAX_BYTES, normalizeContentType, sanitizeMe
 import {
   accountPrefix,
   buildArtifactRef,
+  isArtifactKind,
   isValidId,
   parseArtifactRef,
   refPrefix,
@@ -93,6 +94,17 @@ export function createObjectStoreOverBackend(
     return { ok: false, error };
   };
 
+  /**
+   * One caller-visible wording for "no such object", whatever the backend
+   * called it. §4.4's guarantee is that a cross-account probe cannot confirm
+   * that an object exists — a foreign ref and a genuine miss must therefore be
+   * indistinguishable in the MESSAGE too, not only in the code, because T-020
+   * may surface `AdapterError.message` to an HTTP client. It also keeps
+   * provider wording out of the caller's hands.
+   */
+  const canonicalMiss = (op: 'get' | 'head', err: AdapterError): AdapterError =>
+    err.code === 'not_found' ? error('not_found', source, `${op} failed: no such object`) : err;
+
   async function put(req: PutArtifactRequest): Promise<ObjectStoreResult<PutResult>> {
     const started = Date.now();
 
@@ -102,6 +114,17 @@ export function createObjectStoreOverBackend(
     }
     if (!isValidId(req.deal_id)) {
       return fail('put', invalid(source, 'deal_id is not a valid id'), { account_id: req.account_id });
+    }
+    // The kind is validated HERE, with the ids, rather than at `buildArtifactRef`
+    // in step 7. The T-019 HTTP/JSON edge is untyped, so `kind` arrives as an
+    // arbitrary string; every gate downstream (the allowlist, the key builder)
+    // must therefore be reachable rather than pre-empted by a crash. The
+    // refusal `buildArtifactRef` already knows how to give is the one returned.
+    if (!isArtifactKind(req.kind)) {
+      return fail('put', invalid(source, 'kind is not an artifact kind'), {
+        account_id: req.account_id,
+        deal_id: req.deal_id,
+      });
     }
 
     // Steps 2–6 — content policy. ALL LOCAL: a hostile or mislabeled request
@@ -144,7 +167,19 @@ export function createObjectStoreOverBackend(
     // extra round trip is the price, and it is a decision, not an oversight.
     const existing = await backend.head(ref);
     if (existing.ok) {
-      if (existing.value.byte_length !== req.bytes.byteLength) {
+      // Everything reported for an already-present object is RETRIEVED. A
+      // field the backend could not supply makes the object unevaluable
+      // (§5.6, ADR-005), never a default filled in from the request.
+      const stored = resolveHead(existing.value, source);
+      if (!stored.ok) {
+        return fail('put', stored.error, {
+          account_id: req.account_id,
+          deal_id: req.deal_id,
+          kind: req.kind,
+          ref_prefix: refPrefix(ref),
+        });
+      }
+      if (stored.value.byte_length !== req.bytes.byteLength) {
         // Identical hash, different length — an integrity alarm, not a hit.
         return fail(
           'put',
@@ -152,7 +187,13 @@ export function createObjectStoreOverBackend(
           { account_id: req.account_id, deal_id: req.deal_id, kind: req.kind, ref_prefix: refPrefix(ref) },
         );
       }
-      const metadata = metadataFromHead(ref, location, existing.value, content_type);
+      // The STORED content type, not the request's. Two allowlisted labels can
+      // share a magic requirement (text/plain and text/csv both only forbid a
+      // NUL byte), so re-putting identical bytes under a second label must not
+      // make `PutResult.metadata` disagree with what `head`/`get` return — a
+      // caller persisting this into a Postgres row (AC-5) would serve the
+      // wrong Content-Type permanently.
+      const metadata = metadataFromHead(ref, location, existing.value, stored.value);
       emit({
         op: 'put',
         level: 'info',
@@ -279,7 +320,7 @@ export function createObjectStoreOverBackend(
 
     const fetched = await backend.get(ref);
     if (!fetched.ok) {
-      return fail('get', fetched.error, {
+      return fail('get', canonicalMiss('get', fetched.error), {
         account_id,
         deal_id: location.deal_id,
         kind: location.kind,
@@ -305,8 +346,9 @@ export function createObjectStoreOverBackend(
         ref_prefix: refPrefix(ref),
       });
     }
-    if (fetched.value.content_type === undefined) {
-      return fail('get', error('malformed_response', source, 'stored object has no content type'), {
+    const stored = resolveHead(fetched.value, source);
+    if (!stored.ok) {
+      return fail('get', stored.error, {
         account_id,
         deal_id: location.deal_id,
         kind: location.kind,
@@ -323,13 +365,13 @@ export function createObjectStoreOverBackend(
       deal_id: location.deal_id,
       kind: location.kind,
       ref_prefix: refPrefix(ref),
-      byte_length: fetched.value.byte_length,
+      byte_length: stored.value.byte_length,
       duration_ms: Date.now() - started,
     });
     return {
       ok: true,
       value: {
-        metadata: metadataFromHead(ref, location, fetched.value, fetched.value.content_type),
+        metadata: metadataFromHead(ref, location, fetched.value, stored.value),
         bytes: fetched.value.bytes,
       },
     };
@@ -343,7 +385,7 @@ export function createObjectStoreOverBackend(
 
     const fetched = await backend.head(ref);
     if (!fetched.ok) {
-      return fail('head', fetched.error, {
+      return fail('head', canonicalMiss('head', fetched.error), {
         account_id,
         deal_id: location.deal_id,
         kind: location.kind,
@@ -359,8 +401,9 @@ export function createObjectStoreOverBackend(
         ref_prefix: refPrefix(ref),
       });
     }
-    if (fetched.value.content_type === undefined) {
-      return fail('head', error('malformed_response', source, 'stored object has no content type'), {
+    const stored = resolveHead(fetched.value, source);
+    if (!stored.ok) {
+      return fail('head', stored.error, {
         account_id,
         deal_id: location.deal_id,
         kind: location.kind,
@@ -377,10 +420,10 @@ export function createObjectStoreOverBackend(
       deal_id: location.deal_id,
       kind: location.kind,
       ref_prefix: refPrefix(ref),
-      byte_length: fetched.value.byte_length,
+      byte_length: stored.value.byte_length,
       duration_ms: Date.now() - started,
     });
-    return { ok: true, value: metadataFromHead(ref, location, fetched.value, fetched.value.content_type) };
+    return { ok: true, value: metadataFromHead(ref, location, fetched.value, stored.value) };
   }
 
   async function list(account_id: string, filter: ListFilter = {}): Promise<ObjectStoreResult<ListPage>> {
@@ -431,6 +474,16 @@ export function createObjectStoreOverBackend(
         return fail('list', error('malformed_response', source, 'stored key is not a valid artifact ref'), {
           account_id,
         });
+      }
+      // §5.6 / ADR-005 again: a listing that could not report a size or a
+      // timestamp says so, rather than reporting a plausible-looking zero or
+      // "now" that a caller cannot distinguish from a retrieved value.
+      if (entry.byte_length === undefined || entry.stored_at === undefined) {
+        return fail(
+          'list',
+          error('malformed_response', source, 'stored key is missing a byte length or a timestamp'),
+          { account_id },
+        );
       }
       items.push({
         ref: entry.key,
@@ -499,11 +552,52 @@ export function createInMemoryObjectStore(
   return { ...store, size: () => backend.size() };
 }
 
+/**
+ * The three fields a caller-visible `ObjectMetadata` needs that only the
+ * BACKEND can supply. Keeping them in one type is what makes it impossible to
+ * build metadata from a head that did not carry them.
+ */
+interface RetrievedHead {
+  content_type: string;
+  byte_length: number;
+  stored_at: IsoTimestamp;
+}
+
+/**
+ * Nothing here invents a value it did not retrieve (docs/design/T-018.md §5.6;
+ * ADR-005 — a missing required input is unevaluable, never zero). A provider
+ * that omits a field yields `malformed_response`, which the caller can act on,
+ * rather than a `0` byte length or a `stored_at` of "now" that it cannot tell
+ * apart from the truth.
+ */
+function resolveHead(
+  head: BackendHead,
+  source: string,
+): { ok: true; value: RetrievedHead } | { ok: false; error: AdapterError } {
+  if (head.content_type === undefined) {
+    return { ok: false, error: error('malformed_response', source, 'stored object has no content type') };
+  }
+  if (head.byte_length === undefined) {
+    return { ok: false, error: error('malformed_response', source, 'stored object has no byte length') };
+  }
+  if (head.stored_at === undefined) {
+    return { ok: false, error: error('malformed_response', source, 'stored object has no stored_at timestamp') };
+  }
+  return {
+    ok: true,
+    value: {
+      content_type: head.content_type,
+      byte_length: head.byte_length,
+      stored_at: head.stored_at,
+    },
+  };
+}
+
 function metadataFromHead(
   ref: ObjectRef,
   location: ArtifactLocation,
   head: BackendHead,
-  content_type: string,
+  retrieved: RetrievedHead,
 ): ObjectMetadata {
   const filename = head.metadata[META_FILENAME];
   const origin_ref = head.metadata[META_ORIGIN_REF];
@@ -512,12 +606,12 @@ function metadataFromHead(
     account_id: location.account_id,
     deal_id: location.deal_id,
     kind: location.kind,
-    content_type,
-    byte_length: head.byte_length,
+    content_type: retrieved.content_type,
+    byte_length: retrieved.byte_length,
     content_sha256: location.content_sha256,
     ...(filename !== undefined ? { filename } : {}),
     ...(origin_ref !== undefined ? { origin_ref } : {}),
-    stored_at: head.stored_at,
+    stored_at: retrieved.stored_at,
   };
 }
 

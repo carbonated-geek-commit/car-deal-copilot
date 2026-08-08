@@ -147,8 +147,19 @@ export function normalizeContentType(content_type: string): string {
   return base.trim().toLowerCase();
 }
 
-export function isAllowedForKind(kind: ArtifactKind, content_type: string): boolean {
-  return ALLOWED_CONTENT_TYPES[kind].includes(normalizeContentType(content_type));
+/**
+ * TOTAL by construction. The parameter is typed `string`, not `ArtifactKind`,
+ * because the T-019 HTTP/JSON edge hands this package whatever a caller typed:
+ * a `kind` outside the union reaches here as a value, and indexing the literal
+ * record with it yields `undefined`. Returning `false` for an unknown kind
+ * keeps the failure a VALUE — an adapter never throws across the boundary
+ * (`@core` `AdapterResult`; docs/design/T-018.md §2.1).
+ */
+export function isAllowedForKind(kind: string, content_type: string): boolean {
+  const allowed = (ALLOWED_CONTENT_TYPES as Readonly<Record<string, readonly string[] | undefined>>)[
+    kind
+  ];
+  return allowed !== undefined && allowed.includes(normalizeContentType(content_type));
 }
 
 export interface ContentPolicyInput {
