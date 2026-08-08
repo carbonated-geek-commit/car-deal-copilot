@@ -1,9 +1,9 @@
 ---
 id: T-015
 title: Epic-2 workspace + dependency baseline (db, store-pg, object-store, api)
-stage: design
+stage: build
 owner_agent: designer
-status: pending
+status: in_progress
 depends_on: []
 file_ownership:
   - "package.json"
@@ -54,3 +54,4 @@ The monorepo has room for Epic 2 and exactly one place where dependencies enter.
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
+2026-08-07 15:30 · designer · design complete → docs/design/T-015.md; stage design → build; deviations D2 (fourth alias @comms — required or T-017/T-018/T-019 have no legal import path) and D5 (empty TS project is a tsc error; scripts-only ownership amendment requested for T-016..T-019) flagged to lead
