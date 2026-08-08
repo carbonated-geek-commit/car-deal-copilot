@@ -1,9 +1,9 @@
 ---
 id: T-010
 title: Spine v0.5 domain migration (packages/core) — VehicleTarget/VehicleInstance, Dealership, ratified Message
-stage: design
-owner_agent: designer
-status: pending
+stage: build
+owner_agent: builder
+status: in_progress
 depends_on: []
 file_ownership:
   - "packages/core/**"
@@ -61,3 +61,4 @@ mock_only: false
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half A: v0.5 domain migration)
+undefined · designer · design doc published (docs/design/T-010.md): full v0.5 type surface (VehicleTarget/VehicleInstance split, Dealership + DealershipContact tenancy split, ratified Message, instance-bound ValuationSnapshot/VehicleData, above_market, transcription contracts removed), delete-not-deprecate checklist, per-operation error/idempotency tables, 14 invariant touchpoints, AC 1-17 trace; interpretive calls D1-D15 logged; two resolved deviations noted (D4 optional vehicle_instance/working_with, D7 reliability? omitted); stage design → build
