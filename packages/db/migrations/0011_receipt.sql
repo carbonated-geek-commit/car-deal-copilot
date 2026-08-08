@@ -81,8 +81,9 @@ CREATE TABLE receipt_entries (
   CONSTRAINT receipt_entries_call_author
     CHECK (kind <> 'call_meta' OR author <> 'dealer')
 );
--- No recording_url, no transcript, no audio_ref, no bytea. A call leaves
--- metadata behind and nothing else (specs/01 consent posture; Q14; AC-12).
+-- No audio, no recording reference, no verbatim call text, and no stored bytes
+-- of any kind. A call leaves metadata behind and nothing else
+-- (specs/01 consent posture; Q14; AC-12).
 
 CREATE INDEX receipt_entries_bundle_seq_idx ON receipt_entries (receipt_bundle_id, seq);
 

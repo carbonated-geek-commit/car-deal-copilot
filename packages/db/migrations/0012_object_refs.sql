@@ -5,9 +5,9 @@
 -- generated dossiers" — and "No audio is stored".
 -- docs/design/T-016.md §3.7, D13, §5.10.
 --
--- No table in this schema has a bytea column. object_refs is the only place in
--- the system where stored bytes are addressable, which makes it the only place
--- the no-audio rule can be structural rather than remembered.
+-- No table in this schema stores raw bytes. object_refs is the only place in
+-- the system where stored bytes are addressable at all, which makes it the only
+-- place the no-audio rule can be structural rather than remembered.
 
 CREATE TABLE object_refs (
   id           uuid NOT NULL DEFAULT gen_random_uuid(),

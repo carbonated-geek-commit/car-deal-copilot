@@ -6,8 +6,8 @@
 -- `recording_url` field on `Message` at all"; no audio is stored.
 -- docs/design/T-016.md §3.4.
 --
--- THERE IS NO recording_url, transcript, audio_ref, OR bytea COLUMN HERE OR
--- ANYWHERE IN THIS SCHEMA (AC-12, Q14). The fields were removed from the spine
+-- THIS TABLE POINTS AT NO AUDIO, NO RECORDING, AND NO CALL TEXT, AND NEITHER
+-- DOES ANY OTHER TABLE IN THIS SCHEMA (AC-12, Q14). The fields were removed from the spine
 -- rather than left null, and this schema does not resurrect them. Call
 -- metadata — start, duration, other party — is all that a call leaves behind.
 

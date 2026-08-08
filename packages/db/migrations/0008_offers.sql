@@ -6,8 +6,8 @@
 --
 -- Every optional money/rate column below is NULLABLE AND HAS NO DEFAULT. NULL
 -- means "the dealer stated no price" and T-017 maps it to `undefined`, never to
--- 0. A `DEFAULT 0` anywhere in this file would be ADR-005's silently-passed
--- flag expressed in DDL.
+-- 0. A zero default on any of them would be ADR-005's silently-passed flag
+-- expressed in DDL, so none of them has one.
 
 CREATE TABLE offers (
   id               uuid NOT NULL DEFAULT gen_random_uuid(),
