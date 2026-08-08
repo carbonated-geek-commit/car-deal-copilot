@@ -8,6 +8,7 @@ depends_on: [T-014, T-015, T-017, T-018]
 file_ownership:
   - "services/api/src/**"
   - "services/api/test/**"
+  - "services/api/package.json"   # scripts field ONLY, per ADR-009
 spec_refs:
   - "specs/00-shared-core-architecture.md#stack-opinionated--shared-defaults"
   - "specs/00-shared-core-architecture.md#core-domain-model"

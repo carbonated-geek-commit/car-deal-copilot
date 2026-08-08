@@ -8,6 +8,7 @@ depends_on: [T-012, T-015]
 file_ownership:
   - "packages/object-store/src/**"
   - "packages/object-store/test/**"
+  - "packages/object-store/package.json"   # scripts field ONLY, per ADR-009
 spec_refs:
   - "specs/00-shared-core-architecture.md#core-domain-model"
   - "specs/00-shared-core-architecture.md#integrations--anti-corruption--adapter-layer-shared"

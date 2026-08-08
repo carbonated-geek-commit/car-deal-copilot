@@ -9,6 +9,7 @@ file_ownership:
   - "packages/db/src/**"
   - "packages/db/migrations/**"
   - "packages/db/test/**"
+  - "packages/db/package.json"   # scripts field ONLY, per ADR-009
 spec_refs:
   - "specs/00-shared-core-architecture.md#core-domain-model"
   - "specs/00-shared-core-architecture.md#cardinality-invariants-structurally-enforced"

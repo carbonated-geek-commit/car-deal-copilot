@@ -8,6 +8,7 @@ depends_on: [T-014, T-016]
 file_ownership:
   - "packages/store-pg/src/**"
   - "packages/store-pg/test/**"
+  - "packages/store-pg/package.json"   # scripts field ONLY, per ADR-009
 spec_refs:
   - "specs/00-shared-core-architecture.md#core-domain-model"
   - "specs/00-shared-core-architecture.md#dealership-data-tenancy"
