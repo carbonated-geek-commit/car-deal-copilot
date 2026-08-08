@@ -1,0 +1,14 @@
+{
+  "name": "sms-fee-only",
+  "channel": "sms",
+  "text": "Heads up, there is a $499 doc fee on top of that.",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [
+        { "name": "doc fee", "amount": 49900 }
+      ],
+      "flags": []
+    }
+  }
+}

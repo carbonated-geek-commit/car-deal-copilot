@@ -1,9 +1,9 @@
 ---
 id: T-006
 title: Credit prequal adapter — pass-through mock (token + prequal results only)
-stage: design
-owner_agent: designer
-status: pending
+stage: done
+owner_agent: verifier
+status: done
 depends_on: [T-001]
 file_ownership:
   - "packages/adapters/credit-prequal/**"
@@ -36,3 +36,7 @@ A `packages/adapters/credit-prequal` package exists with a mock credit-provider 
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+undefined · designer · design doc produced (docs/design/T-006.md); interpretive calls D1-D6 logged; stage design → build
+undefined · builder · built packages/adapters/credit-prequal per docs/design/T-006.md (mock adapter + fixtures, zero deps, tsc clean); tests left to tester; stage build → test
+undefined · tester · wrote test/credit-prequal.test.ts (31 tests: §5.1-5.6 round trip, serialization + type-level leak checks, full §4.1 error table incl. fixture-drift and duplicate-id paths, never-throws, determinism, log-safe messages, export-surface/no-webhook check); npx vitest run + tsc --noEmit both clean; stage test → validate
+undefined · verifier · validated: diff scoped to ownership+design+task file; traceability to specs/01 credit-data-residency, specs/00 anti-corruption, ADR-001/ADR-004 confirmed; mock-only (zero deps, no HTTP/credentials); re-ran vitest 31/31 pass + tsc clean; zero findings; approve=true; stage validate → done

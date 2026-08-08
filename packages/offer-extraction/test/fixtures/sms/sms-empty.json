@@ -1,0 +1,8 @@
+{
+  "name": "sms-empty",
+  "channel": "sms",
+  "text": "",
+  "expected": {
+    "found": false
+  }
+}

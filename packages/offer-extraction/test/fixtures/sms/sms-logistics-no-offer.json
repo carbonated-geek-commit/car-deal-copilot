@@ -1,0 +1,8 @@
+{
+  "name": "sms-logistics-no-offer",
+  "channel": "sms",
+  "text": "See you at 3, ask for Dave.",
+  "expected": {
+    "found": false
+  }
+}

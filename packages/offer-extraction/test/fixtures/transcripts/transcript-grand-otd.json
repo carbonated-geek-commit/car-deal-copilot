@@ -1,0 +1,13 @@
+{
+  "name": "transcript-grand-otd",
+  "channel": "call",
+  "text": "Tell you what, I can let it go for twenty nine grand out the door, today only.",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [],
+      "flags": [],
+      "sale_price": 2900000
+    }
+  }
+}

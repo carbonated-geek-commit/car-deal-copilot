@@ -1,9 +1,9 @@
 ---
 id: T-005
 title: Vehicle-history adapters — Carfax-mock + AutoCheck-mock (accident/title)
-stage: design
-owner_agent: designer
-status: pending
+stage: done
+owner_agent: verifier
+status: done
 depends_on: [T-001]
 file_ownership:
   - "packages/adapters/vehicle-history/**"
@@ -36,3 +36,7 @@ A `packages/adapters/vehicle-history` package exists with mock adapter implement
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+2026-08-07 12:34 · designer · design doc produced (docs/design/T-005.md); stage design → build; no blockers, interpretive calls D1–D5 logged in doc
+2026-08-07 · builder · package implemented per design (src only; tests left to tester); tsc -p package clean; stage build → test
+2026-08-07 · tester · co-located vitest suites written (test/carfax-mock, test/autocheck-mock, test/contract); 63 tests pass offline, tsc clean; error table T-001 §5.1 covered row by row incl. auth-unreachable; stage test → validate
+undefined · verifier · validated: diff scoped to ownership+design+task file; traceability to specs/00 vehicle-data/anti-corruption/core-domain-model, ADR-001/ADR-003/ADR-004 confirmed (D1–D5 all logged with basis); mock-only structural (zero deps, no I/O, no URL/credential/env surface, auth code unreachable per contract test); re-ran vitest 63/63 pass + tsc -p package clean; zero findings; approve=true; stage validate → done

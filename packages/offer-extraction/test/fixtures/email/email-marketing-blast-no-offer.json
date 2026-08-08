@@ -1,0 +1,8 @@
+{
+  "name": "email-marketing-blast-no-offer",
+  "channel": "email",
+  "text": "SUMMER SALE this weekend only!\n\nSedans starting at $18,995 and financing as low as 2.9% APR on approved credit for well-qualified buyers.\n\nVisit us Saturday!",
+  "expected": {
+    "found": false
+  }
+}

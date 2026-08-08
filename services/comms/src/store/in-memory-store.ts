@@ -1,0 +1,283 @@
+/**
+ * In-memory comms store (design T-009 §3.2). Seam: Postgres relational core
+ * (specs/00 "Store") — rows here mirror the eventual tables, so the swap is
+ * an implementation change, not a redesign.
+ *
+ * The `@core` `Message` is stored VERBATIM inside its row (AC-6 — no
+ * parallel message shape); `provider_message_ref` sits beside it as a
+ * store-internal correlation column (D3), never a spine field.
+ *
+ * Append-only posture: the write surface is append + fill-once only — no
+ * update or delete of message content exists on the port (§3.2, D7).
+ *
+ * Identity routing is the AUTHORITATIVE mapping (§8 invariant 1): exact
+ * match only, over values normalized identically at bind and at resolve.
+ * Provider-agnostic by construction — no provider name appears anywhere in
+ * this module (AC-3).
+ */
+
+import type { Deal, DealerContact, DealerThread, IdentityRef, Message, Offer } from '@core';
+import type {
+  CommsStore,
+  QuarantinedRecord,
+  StoredMessage,
+  UnroutedRecord,
+} from '../ports.js';
+import { mergeCurrentOffer, type RollupContribution, type RollupState } from '../rollup.js';
+
+/**
+ * Normalization — identical at bind and at resolve (§3.2), conservative on
+ * purpose: strip formatting only, never guess country codes or alias
+ * variants. A near-miss identity is a NON-match (D5; test 9).
+ */
+const normalizePhone = (phone: string): string => {
+  const trimmed = phone.trim();
+  const digits = trimmed.replace(/[^0-9]/g, '');
+  return trimmed.startsWith('+') ? '+' + digits : digits;
+};
+
+const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+
+/** D6: deterministic dealer_id from the normalized sender contact. */
+const dealerIdFor = (from: { phone?: string; email?: string }): string | undefined => {
+  if (from.phone !== undefined && from.phone !== '') return 'dealer:sms:' + normalizePhone(from.phone);
+  if (from.email !== undefined && from.email !== '') return 'dealer:email:' + normalizeEmail(from.email);
+  return undefined;
+};
+
+interface ThreadRecord {
+  dealer_id: string;
+  dealer_name: string;
+  contact: DealerContact;
+  rows: StoredMessage[];
+  current_offer?: Offer;
+  rollup: RollupState;
+}
+
+interface DealRecord {
+  deal: Deal;
+  threads: Map<string, ThreadRecord>;
+  /** D3 correlation index: provider_message_ref → row location. */
+  refIndex: Map<string, { dealer_id: string; row_index: number }>;
+}
+
+export class InMemoryCommsStore implements CommsStore {
+  private readonly deals = new Map<string, DealRecord>();
+  /** Routing table: 'phone:<normalized>' | 'email:<normalized>' → deal_id. */
+  private readonly identityIndex = new Map<string, string>();
+  private readonly quarantined: QuarantinedRecord[] = [];
+  private readonly unrouted: UnroutedRecord[] = [];
+  /** Consumer idempotency ledger: '<consumer>\u0000<key>' (NUL-separated). */
+  private readonly processed = new Set<string>();
+
+  // -- seeding + identity routing ----------------------------------------
+
+  putDeal(deal: Deal): void {
+    const clone = structuredClone(deal);
+    const threads = new Map<string, ThreadRecord>();
+    // Seeded threads (if any) become records; their messages carry no
+    // provider correlation refs, so they are not correlation-indexed.
+    for (const t of clone.dealer_threads) {
+      threads.set(t.dealer_id, {
+        dealer_id: t.dealer_id,
+        dealer_name: t.dealer_name,
+        contact: t.contact,
+        rows: t.messages.map((m) => ({ message: m, provider_message_ref: '', source: '' })),
+        ...(t.current_offer !== undefined ? { current_offer: t.current_offer } : {}),
+        rollup: {},
+      });
+    }
+    this.deals.set(clone.id, { deal: clone, threads, refIndex: new Map() });
+    if (clone.identity_ref !== undefined) {
+      this.bindIdentity(clone.id, clone.identity_ref);
+    }
+  }
+
+  bindIdentity(deal_id: string, identity: IdentityRef): void {
+    if (identity.phone_number !== undefined) {
+      this.identityIndex.set('phone:' + normalizePhone(identity.phone_number), deal_id);
+    }
+    if (identity.email_alias !== undefined) {
+      this.identityIndex.set('email:' + normalizeEmail(identity.email_alias), deal_id);
+    }
+  }
+
+  resolveDealByIdentity(to: { phone_number?: string; email_alias?: string }): string | undefined {
+    if (to.phone_number !== undefined) {
+      const hit = this.identityIndex.get('phone:' + normalizePhone(to.phone_number));
+      if (hit !== undefined) return hit;
+    }
+    if (to.email_alias !== undefined) {
+      const hit = this.identityIndex.get('email:' + normalizeEmail(to.email_alias));
+      if (hit !== undefined) return hit;
+    }
+    return undefined; // exact match only — never fuzzy (D5)
+  }
+
+  // -- threading ----------------------------------------------------------
+
+  resolveOrCreateThread(deal_id: string, from: { phone?: string; email?: string }): { dealer_id: string } {
+    const rec = this.mustDeal(deal_id);
+    const phone = from.phone !== undefined && from.phone !== '' ? normalizePhone(from.phone) : undefined;
+    const email = from.email !== undefined && from.email !== '' ? normalizeEmail(from.email) : undefined;
+    // Match against existing thread contacts first (D6).
+    for (const t of rec.threads.values()) {
+      if (phone !== undefined && t.contact.phone !== undefined && normalizePhone(t.contact.phone) === phone) {
+        return { dealer_id: t.dealer_id };
+      }
+      if (email !== undefined && t.contact.email !== undefined && normalizeEmail(t.contact.email) === email) {
+        return { dealer_id: t.dealer_id };
+      }
+    }
+    const dealer_id = dealerIdFor(from);
+    if (dealer_id === undefined) {
+      throw new Error('resolveOrCreateThread: inbound has neither phone nor email sender');
+    }
+    const existing = rec.threads.get(dealer_id);
+    if (existing !== undefined) return { dealer_id }; // deterministic id — idempotent under redelivery
+    const contact: DealerContact = {
+      ...(phone !== undefined ? { phone } : {}),
+      ...(email !== undefined ? { email } : {}),
+    };
+    rec.threads.set(dealer_id, {
+      dealer_id,
+      dealer_name: phone ?? email ?? dealer_id, // normalized contact string; enrichment later (D6)
+      contact,
+      rows: [],
+      rollup: {},
+    });
+    return { dealer_id };
+  }
+
+  appendMessage(deal_id: string, dealer_id: string, row: StoredMessage): 'appended' | 'duplicate' {
+    const rec = this.mustDeal(deal_id);
+    if (rec.refIndex.has(row.provider_message_ref)) return 'duplicate';
+    const thread = rec.threads.get(dealer_id);
+    if (thread === undefined) {
+      throw new Error('appendMessage: unknown dealer_id (resolveOrCreateThread must run first)');
+    }
+    thread.rows.push(structuredClone(row));
+    rec.refIndex.set(row.provider_message_ref, { dealer_id, row_index: thread.rows.length - 1 });
+    return 'appended';
+  }
+
+  // -- fill-once enrichment (D7: never overwrites, never deletes) ----------
+
+  setTranscript(deal_id: string, provider_message_ref: string, transcript: string): 'set' | 'already_set' | 'not_found' {
+    const row = this.findRow(deal_id, provider_message_ref);
+    if (row === undefined) return 'not_found';
+    if (row.message.transcript !== undefined) return 'already_set';
+    row.message.transcript = transcript;
+    return 'set';
+  }
+
+  attachExtractedOffer(deal_id: string, provider_message_ref: string, offer: Offer): 'set' | 'already_set' | 'not_found' {
+    const row = this.findRow(deal_id, provider_message_ref);
+    if (row === undefined) return 'not_found';
+    if (row.message.extracted_offer !== undefined) return 'already_set';
+    row.message.extracted_offer = structuredClone(offer); // extractor output, verbatim (possibly partial — ADR-005)
+    return 'set';
+  }
+
+  rollupCurrentOffer(deal_id: string, dealer_id: string, contribution: RollupContribution): void {
+    const rec = this.mustDeal(deal_id);
+    const thread = rec.threads.get(dealer_id);
+    if (thread === undefined) {
+      throw new Error('rollupCurrentOffer: unknown dealer_id');
+    }
+    const merged = mergeCurrentOffer(
+      { ...(thread.current_offer !== undefined ? { offer: thread.current_offer } : {}), state: thread.rollup },
+      contribution,
+    );
+    thread.current_offer = merged.offer;
+    thread.rollup = merged.state;
+  }
+
+  // -- no-drop holding areas (keyed no-ops — §5.4 braces) ------------------
+
+  recordQuarantined(rec: QuarantinedRecord): void {
+    const dupe = this.quarantined.some(
+      (q) => q.source === rec.source && q.raw_payload_ref === rec.raw_payload_ref,
+    );
+    if (dupe) return;
+    this.quarantined.push(structuredClone(rec));
+  }
+
+  recordUnrouted(rec: UnroutedRecord): void {
+    const dupe = this.unrouted.some(
+      (u) => u.source === rec.source && u.inbound.provider_message_ref === rec.inbound.provider_message_ref,
+    );
+    if (dupe) return;
+    this.unrouted.push(structuredClone(rec));
+  }
+
+  // -- consumer idempotency ledger ----------------------------------------
+
+  hasProcessed(consumer: string, idempotency_key: string): boolean {
+    return this.processed.has(consumer + '\u0000' + idempotency_key);
+  }
+
+  markProcessed(consumer: string, idempotency_key: string): 'first' | 'duplicate' {
+    const key = consumer + '\u0000' + idempotency_key;
+    if (this.processed.has(key)) return 'duplicate';
+    this.processed.add(key);
+    return 'first';
+  }
+
+  // -- read side (assembly; the read model deep-clones) --------------------
+
+  getDeal(deal_id: string): Deal | undefined {
+    const rec = this.deals.get(deal_id);
+    if (rec === undefined) return undefined;
+    return {
+      ...rec.deal,
+      dealer_threads: [...rec.threads.values()].map((t) => this.assembleThread(t)),
+    };
+  }
+
+  getThread(deal_id: string, dealer_id: string): DealerThread | undefined {
+    const thread = this.deals.get(deal_id)?.threads.get(dealer_id);
+    if (thread === undefined) return undefined;
+    return this.assembleThread(thread);
+  }
+
+  getMessageByRef(deal_id: string, provider_message_ref: string): StoredMessage | undefined {
+    return this.findRow(deal_id, provider_message_ref);
+  }
+
+  listQuarantined(): readonly QuarantinedRecord[] {
+    return this.quarantined;
+  }
+
+  listUnrouted(): readonly UnroutedRecord[] {
+    return this.unrouted;
+  }
+
+  // -- internals -----------------------------------------------------------
+
+  private assembleThread(t: ThreadRecord): DealerThread {
+    return {
+      dealer_id: t.dealer_id,
+      dealer_name: t.dealer_name,
+      contact: t.contact,
+      messages: t.rows.map((r) => r.message),
+      ...(t.current_offer !== undefined ? { current_offer: t.current_offer } : {}),
+    };
+  }
+
+  private findRow(deal_id: string, provider_message_ref: string): StoredMessage | undefined {
+    const rec = this.deals.get(deal_id);
+    if (rec === undefined) return undefined;
+    const loc = rec.refIndex.get(provider_message_ref);
+    if (loc === undefined) return undefined;
+    return rec.threads.get(loc.dealer_id)?.rows[loc.row_index];
+  }
+
+  private mustDeal(deal_id: string): DealRecord {
+    const rec = this.deals.get(deal_id);
+    if (rec === undefined) {
+      throw new Error('unknown deal_id'); // consumer classifies as retry (§5.3 store class)
+    }
+    return rec;
+  }
+}

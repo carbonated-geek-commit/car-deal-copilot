@@ -1,0 +1,13 @@
+{
+  "name": "email-otd-total-only",
+  "channel": "email",
+  "text": "Good afternoon,\n\nYour out-the-door total on the Accord is $31,542.18. Ready to move forward when you are.\n\nBest,\nCasey",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [],
+      "flags": [],
+      "sale_price": 3154218
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "transcript-garbled",
+  "channel": "call",
+  "text": "uh so um like I I mean you know the uh the thing with the with the yeah maybe",
+  "expected": {
+    "found": false
+  }
+}

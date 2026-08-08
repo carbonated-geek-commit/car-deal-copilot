@@ -1,0 +1,13 @@
+{
+  "name": "sms-monthly-only",
+  "channel": "sms",
+  "text": "Good news! We can get you to $389/mo. When can you come in?",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [],
+      "flags": [],
+      "monthly": 38900
+    }
+  }
+}

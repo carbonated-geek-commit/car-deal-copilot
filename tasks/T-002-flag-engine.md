@@ -1,9 +1,9 @@
 ---
 id: T-002
 title: Flag engine — pure function of Offer + qualified-rate + walk-away
-stage: design
-owner_agent: designer
-status: pending
+stage: done
+owner_agent: verifier
+status: done
 depends_on: [T-001]
 file_ownership:
   - "packages/flag-engine/**"
@@ -38,3 +38,8 @@ A `packages/flag-engine` package exists containing a pure, provider-agnostic fun
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 12:00 · planner · task created (Epic 1: shared spine + adapter layer, runnable)
+2026-08-07 · designer · design doc published (docs/design/T-002.md); stage design → build; naming wrinkle already resolved by ADR-002 (payment_packing); thresholds designed as required injectable config with no defaults (design D1); over_walkaway total read as sale_price + Σ fees (design D2) — all interpretive calls logged in design §0, none blocking
+2026-08-07 · builder · implemented packages/flag-engine exactly per design §1–§2 (evaluateOffer + FlagContext/FlagEngineConfig/FeeFairCap, zero deps, no I/O); tsc -p packages/flag-engine --noEmit green; tests left to tester stage; stage build → test
+2026-08-07 · tester · test suite added (packages/flag-engine/test/{fixtures.ts,engine.test.ts}): per-flag firing/not-firing (AC-2..5), D4 boundaries, D3 missing inputs, AC-6 vocabulary (runtime + type-level, 'packing' rejected), D5/D7 purity/ordering/idempotency, §4.1 error paths (NaN/negative/malformed config never throw), §4.2 structural posture (sync, closed export surface); 46/46 green via npx vitest run packages/flag-engine; tsc --noEmit green; no implementation changes needed; stage test → validate
+2026-08-07 · verifier · validated + reviewed diff main...epic-1-shared-spine for T-002 ownership paths: traceability clean (all interpretive calls logged design §0 D1–D7 with spec/ADR basis; ADR-002 payment_packing honored; AC-1..7 traced), invariants clean (pure/no-I/O, zero deps, OfferFlag vocabulary only, no protected-path or out-of-scope file touched), boundary clean (imports only @core/vitest; no env/endpoint/SDK); independently re-ran npx vitest run packages/flag-engine (46/46 green) and tsc -p packages/flag-engine --noEmit (green); tester on record pass; zero findings → approve; stage validate → done
+2026-08-07 · integrator · ADR-005 applied (evaluateOffer now returns FlagEvaluation { flags, unevaluable }: flags with missing required inputs are not emitted and surface as unevaluable — never defaulted to zero; payment_packing evaluable from term alone, over_walkaway requires sale_price, rate_markup requires apr+qualified_apr, junk_fee always evaluable; tests adapted + ADR-005 suites added, 55/55 green, tsc green)

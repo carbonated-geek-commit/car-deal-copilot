@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@core": ["packages/core/src/index.ts"],
+      "@flag-engine": ["packages/flag-engine/src/index.ts"],
+      "@adapters/valuation": ["packages/adapters/valuation/src/index.ts"],
+      "@adapters/nhtsa": ["packages/adapters/nhtsa/src/index.ts"],
+      "@adapters/vehicle-history": ["packages/adapters/vehicle-history/src/index.ts"],
+      "@adapters/credit-prequal": ["packages/adapters/credit-prequal/src/index.ts"],
+      "@offer-extraction": ["packages/offer-extraction/src/index.ts"],
+      "@receipt": ["packages/receipt/src/index.ts"]
+    }
+  }
+}

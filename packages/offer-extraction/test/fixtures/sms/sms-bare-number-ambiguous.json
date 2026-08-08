@@ -1,0 +1,8 @@
+{
+  "name": "sms-bare-number-ambiguous",
+  "channel": "sms",
+  "text": "Talked to my manager. 450. Call me back when you get a chance.",
+  "expected": {
+    "found": false
+  }
+}
