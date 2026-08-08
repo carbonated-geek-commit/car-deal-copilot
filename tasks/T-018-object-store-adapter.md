@@ -1,9 +1,9 @@
 ---
 id: T-018
 title: S3-compatible object store adapter — attachments, documents, dossiers (no audio)
-stage: design
+stage: build
 owner_agent: designer
-status: pending
+status: in_progress
 depends_on: [T-012, T-015]
 file_ownership:
   - "packages/object-store/src/**"
@@ -46,3 +46,4 @@ mock_only: false
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
+2026-08-07 · designer · design complete → docs/design/T-018.md; stage design → build. Notes to lead: D5 (RawPayloadStore is sync, S3 is not — resolved as write-behind within ownership; recommend a follow-up task make the T-014 port async) and D6 (@object-store → @comms import edge, authorized by ADR-009 §1, amends T-015 §2.2). Not blocked.
