@@ -1,0 +1,12 @@
+{
+  "name": "@deal-copilot/api",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^5",
+    "zod": "^4"
+  },
+  "type": "module"
+}

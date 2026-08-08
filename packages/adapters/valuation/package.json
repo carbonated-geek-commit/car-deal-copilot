@@ -1,4 +1,5 @@
 {
   "name": "@deal-copilot/adapters-valuation",
-  "private": true
+  "private": true,
+  "type": "module"
 }

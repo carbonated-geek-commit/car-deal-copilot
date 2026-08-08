@@ -15,15 +15,25 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MESSAGE_CHANNELS } from '@core';
 import { extractOffer } from '@offer-extraction';
 import type { ExtractionInput, ExtractionResult } from '@offer-extraction';
 
 const FIXTURE_ROOT = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
-/** Fixture groups per design §6; hostile inputs prove totality (D4). */
-const GROUPS = ['transcripts', 'sms', 'email', 'hostile'] as const;
+/**
+ * Fixture groups (T-012 §1.5); hostile inputs prove totality (D4).
+ * `notes` is the re-based ex-call corpus: the buyer typing what the dealer
+ * said, keeping every original `expected` block (AC-3).
+ */
+const GROUPS = ['notes', 'sms', 'email', 'hostile'] as const;
 
-const CHANNELS: ReadonlySet<string> = new Set(['call', 'sms', 'email']);
+/**
+ * The channel vocabulary is the spine's (T-012 D13) — a locally-declared Set
+ * is a parallel enum (ADR-001 in a different syntax), and it is why a `note`
+ * fixture would have been rejected by this harness rather than run.
+ */
+const CHANNELS: ReadonlySet<string> = new Set<string>(MESSAGE_CHANNELS);
 
 interface Fixture {
   readonly file: string;
@@ -53,7 +63,7 @@ function loadGroup(group: string): Fixture[] {
       throw new Error(`${group}/${file}: missing "name"`);
     }
     if (typeof channel !== 'string' || !CHANNELS.has(channel)) {
-      throw new Error(`${group}/${file}: "channel" must be call | sms | email (AC-3)`);
+      throw new Error(`${group}/${file}: "channel" must be a @core MessageChannel (AC-1)`);
     }
     if (typeof text !== 'string') {
       throw new Error(`${group}/${file}: "text" must be a string`);

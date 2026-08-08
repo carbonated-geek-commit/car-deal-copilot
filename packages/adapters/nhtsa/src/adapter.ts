@@ -26,6 +26,8 @@ import type {
   RecallRecord,
   VehicleData,
   VehicleDataAdapter,
+  VehicleHistorySummary,
+  VehicleInstance,
   Vin,
   VinDecode,
 } from '@core';
@@ -199,15 +201,65 @@ export function createNhtsaVehicleDataAdapter(
 }
 
 /**
- * Pure assembly of the cached, timestamped aggregate (specs/00 core model;
- * design AC-3, D5). Caching/persistence of the result is the caller's job —
- * the adapter holds no state. `history` is deliberately absent: Carfax/
- * AutoCheck is T-005's mock-only territory.
+ * The observations that were ACTUALLY OBTAINED for one instance.
+ *
+ * Every field here comes from a SUCCESSFUL call (T-013 D9): `recalls: []` means
+ * "vPIC answered: zero campaigns", never "we did not look". A failed decode /
+ * recalls call means this assembler is NOT invoked for that pass — ADR-005's
+ * "a missing required input is UNEVALUABLE, never zero and never *not
+ * triggered*" applied to a required array field.
+ */
+export interface VehicleDataParts {
+  /** Absent when vPIC was not consulted or the instance has no VIN (Q16, D10). */
+  decode?: VinDecode;
+  /** Required. `[]` is an ANSWER, not a placeholder. */
+  recalls: RecallRecord[];
+  /**
+   * From `@adapters/vehicle-history` when a history call succeeded (D8).
+   * History is a separate, paid, mock-only feed: its absence does not
+   * invalidate decode + recalls.
+   */
+  history?: VehicleHistorySummary;
+}
+
+/**
+ * Pure, total assembly of the cached, timestamped, INSTANCE-BOUND aggregate
+ * (specs/00 "Core domain model": `VehicleData … ├── vehicle_instance_id`).
+ *
+ * Taking the `VehicleInstance` itself rather than a bare id string makes an
+ * unbound `VehicleData` unrepresentable (T-013 D7, AC-3) — the id cannot be
+ * forgotten, mistyped or defaulted. Caching/persistence of the result is the
+ * caller's job; this package holds no state.
+ *
+ * No failure path, no clock read, no validation: blank-id rejection belongs to
+ * the write path (schema constraint / API validation), not to a pure assembler.
+ *
+ * Call sequence a composition root follows (D9, D10):
+ * ```
+ * instance.vin === undefined   → no calls, NO VehicleData record; absence of the
+ *                                record IS the unevaluable state (Q16)
+ * decodeVin(...)  → !ok        → no record this pass, retry per `retryable`
+ * getRecalls(...) → !ok        → no record this pass, retry per `retryable`
+ * getHistory(...) → !ok        → assemble WITHOUT `history`
+ * all obtained                 → toVehicleData(instance, parts, now())
+ * ```
+ * The "no VIN ⇒ no record" rule needs no runtime guard: `instance.vin` is
+ * `string | undefined` and every VIN-keyed adapter method takes `Vin`, so under
+ * `strict` + `exactOptionalPropertyTypes` passing it un-narrowed is a compile
+ * error.
  */
 export function toVehicleData(
-  decode: VinDecode,
-  recalls: RecallRecord[],
-  fetched_at: IsoTimestamp,
+  instance: VehicleInstance,
+  parts: VehicleDataParts,
+  captured_at: IsoTimestamp,
 ): VehicleData {
-  return { vin: decode.vin, decode, recalls, fetched_at };
+  return {
+    vehicle_instance_id: instance.id,
+    ...(parts.decode !== undefined ? { decode: parts.decode } : {}),
+    // Fresh array so a caller can never mutate the assembler's input through
+    // the returned record.
+    recalls: [...parts.recalls],
+    ...(parts.history !== undefined ? { history: parts.history } : {}),
+    captured_at,
+  };
 }

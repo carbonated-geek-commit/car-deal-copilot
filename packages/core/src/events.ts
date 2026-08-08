@@ -1,14 +1,17 @@
 /**
  * Event contracts — the async backbone (shared).
  *
- * specs/00 "Async backbone": the bus drives inbound-comms processing,
- * transcription, offer extraction, valuation refresh, alert dispatch.
- * Contracts are versioned (`.v1` suffix) so payloads can evolve without
- * breaking consumers.
+ * specs/00 "Async backbone": the bus drives inbound-comms processing, offer
+ * extraction, valuation refresh, alert dispatch. Contracts are versioned
+ * (`.v1` suffix) so payloads can evolve without breaking consumers.
+ *
+ * There are no transcription contracts: specs/01 "Consent & recording posture"
+ * and Q14 removed audio and ASR entirely, so no transcription stage exists on
+ * the bus to request work from.
  *
  * specs/00 "Comms aggregation layer": webhooks ack immediately, all heavy
- * work (transcription, extraction) runs on the event bus — heavy work exists
- * ONLY as event types here; there is no synchronous adapter method for it.
+ * work (extraction) runs on the event bus — heavy work exists ONLY as event
+ * types here; there is no synchronous adapter method for it.
  *
  * Bus-neutral by design: envelopes are plain JSON-serializable objects;
  * SQS/SNS vs Kafka vs managed queue (specs/00 leaves it open) is a downstream
@@ -45,8 +48,6 @@ export interface EventEnvelope<
 
 export type SpineEventType =
   | 'comms.inbound.received.v1'
-  | 'comms.transcription.requested.v1'
-  | 'comms.transcription.completed.v1'
   | 'offer.extraction.requested.v1'
   | 'offer.extraction.completed.v1'
   | 'valuation.refresh.requested.v1'
@@ -87,35 +88,22 @@ export const isQuarantinedInbound = (
   payload: CommsInboundPayloadV1,
 ): payload is CommsInboundQuarantinedV1 => 'parse_error' in payload;
 
-// -- transcription (calls; consumer policy = transcribe-only, no audio retention)
-export interface TranscriptionRequestedV1 {
-  deal_id: string;
-  dealer_id: string;
-  call_ref: string;
-  provider_message_ref: string;
-}
-
-export interface TranscriptionCompletedV1 {
-  deal_id: string;
-  dealer_id: string;
-  provider_message_ref: string;
-  transcript: string;
-}
-
-// -- offer extraction (transcript/text/email → parsed Offer, specs/00)
+// -- offer extraction (specs/00: runs on ANY message text — buyer note, SMS, or
+//    email; the extractor is channel-agnostic and never depends on how the text
+//    was produced)
 export interface OfferExtractionRequestedV1 {
   deal_id: string;
-  dealer_id: string;
-  provider_message_ref: string;
+  dealership_id: string;
+  /** Provider message id for sms/email/call, caller-generated ref for a note. */
+  message_ref: string;
   channel: MessageChannel;
-  /** Body or transcript. */
   text: string;
 }
 
 export interface OfferExtractionCompletedV1 {
   deal_id: string;
-  dealer_id: string;
-  provider_message_ref: string;
+  dealership_id: string;
+  message_ref: string;
   /** Absent when the text contained no offer — a valid, terminal outcome. */
   offer?: Offer;
 }
@@ -134,7 +122,12 @@ export interface ValuationRefreshCompletedV1 {
 // -- alert dispatch (flags, walk-away crossings → owner notification)
 export interface AlertDispatchRequestedV1 {
   deal_id: string;
-  kind: 'flag_raised' | 'offer_received' | 'message_received';
+  /**
+   * `call_logged` is the "you had a call — write your note" prompt: specs/00's
+   * v0.5 call flow is log metadata → notify owner → owner writes a note →
+   * extract on the note.
+   */
+  kind: 'flag_raised' | 'offer_received' | 'message_received' | 'call_logged';
   flags?: OfferFlag[];
   /** Human-readable, PII-free. */
   summary: string;
@@ -143,8 +136,6 @@ export interface AlertDispatchRequestedV1 {
 // Convenience union for typed consumers:
 export type SpineEvent =
   | EventEnvelope<'comms.inbound.received.v1', CommsInboundPayloadV1>
-  | EventEnvelope<'comms.transcription.requested.v1', TranscriptionRequestedV1>
-  | EventEnvelope<'comms.transcription.completed.v1', TranscriptionCompletedV1>
   | EventEnvelope<'offer.extraction.requested.v1', OfferExtractionRequestedV1>
   | EventEnvelope<'offer.extraction.completed.v1', OfferExtractionCompletedV1>
   | EventEnvelope<'valuation.refresh.requested.v1', ValuationRefreshRequestedV1>

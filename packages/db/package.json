@@ -1,0 +1,14 @@
+{
+  "name": "@deal-copilot/db",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8"
+  },
+  "devDependencies": {
+    "@types/pg": "^8"
+  },
+  "type": "module"
+}

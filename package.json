@@ -9,9 +9,11 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -p packages/core --noEmit"
+    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/flag-engine --noEmit && tsc -p packages/offer-extraction --noEmit && tsc -p packages/receipt --noEmit && tsc -p packages/adapters/valuation --noEmit && tsc -p packages/adapters/nhtsa --noEmit && tsc -p packages/adapters/vehicle-history --noEmit && tsc -p packages/adapters/credit-prequal --noEmit && tsc -p services/comms --noEmit && npm run typecheck --workspaces --if-present",
+    "dev": "tsx services/api/src/bin.ts"
   },
   "devDependencies": {
+    "tsx": "^4.23.11",
     "typescript": "^5.5",
     "vitest": "^3"
   }

@@ -1,0 +1,16 @@
+{
+  "name": "note-full-offer",
+  "channel": "note",
+  "text": "He said they can do the car at twenty nine thousand five hundred, with financing at six point nine percent APR for seventy two months, and that puts me right around four twenty five a month.",
+  "expected": {
+    "found": true,
+    "offer": {
+      "fees": [],
+      "flags": [],
+      "sale_price": 2950000,
+      "apr": 6.9,
+      "term_months": 72,
+      "monthly": 42500
+    }
+  }
+}

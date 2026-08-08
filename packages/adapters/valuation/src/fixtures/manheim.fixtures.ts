@@ -2,12 +2,16 @@
  * Default fixture rows for the Manheim-mock adapter (wholesale/auction MMR
  * need, specs/00 "Valuation" table row 2).
  *
- * Discipline (docs/design/T-003.md §3, asserted by tests):
- * - Manheim rows populate ONLY `wholesale` — never `trade_in` / `retail`.
+ * Discipline (docs/design/T-013.md §3.3, asserted by tests):
+ * - Manheim rows populate ONLY `wholesale` — never `trade_in` / `retail` /
+ *   `private_party`. Private-party is KBB's band (Q15).
  * - Every vehicle also appears in kbb.fixtures.ts with coherent numbers
- *   satisfying `wholesale < trade_in < retail` (the spread view is the point).
- * - Deterministic TypeScript modules (D5): no JSON, no I/O, no randomness.
- * - Error rows simulate provider failure paths offline (D4): the 2015 BMW X5
+ *   satisfying `wholesale < trade_in < private_party < retail` (the spread view
+ *   is the point).
+ * - Rows carry both match keys where a demo vehicle has a known VIN, so the Q16
+ *   fall-through (malformed/unknown VIN → spec key) is exercisable.
+ * - Deterministic TypeScript modules: no JSON, no I/O, no randomness, no clock.
+ * - Error rows simulate provider failure paths offline: the 2015 BMW X5
  *   fails here (`provider_unavailable`) but succeeds on the KBB side
  *   (partial-blend demo); the 2014 Audi A4 succeeds here but fails on the
  *   KBB side; the 2012 Jaguar XJ fails on both sides (total-failure demo).
@@ -18,28 +22,35 @@
 import type { ValuationFixtureRow } from '../mock-adapter.js';
 
 export const MANHEIM_DEFAULT_FIXTURES: readonly ValuationFixtureRow[] = [
-  // ---- VIN-keyed demo vehicles ----
+  // ---- VIN-keyed demo vehicles (spec key also present, so an unmatched VIN falls through) ----
   {
-    vin: '1HGCV1F34LA123456', // 2020 Honda Accord Sport
+    vin: '1HGCV1F34LA123456', // 2020 Honda Accord
+    spec_key: { make: 'Honda', model: 'Accord', year: 2020 },
     values: { wholesale: 1_700_000 },
     mileage_adjustment: { baseline_mileage: 45_000, cents_per_mile: 8 },
+    condition_adjustment: { certified: 80_000, new: 250_000 },
+    trim_adjustment: { lx: -40_000, sport: 60_000, touring: 140_000 },
   },
   {
-    vin: '5YJ3E1EA7KF317000', // 2019 Tesla Model 3 Standard Range Plus
+    vin: '5YJ3E1EA7KF317000', // 2019 Tesla Model 3
+    spec_key: { make: 'Tesla', model: 'Model 3', year: 2019 },
     values: { wholesale: 2_050_000 },
     mileage_adjustment: { baseline_mileage: 30_000, cents_per_mile: 10 },
+    condition_adjustment: { certified: 70_000 },
   },
 
-  // ---- spec-keyed demo vehicles (make|model|year; trim ignored for matching) ----
+  // ---- spec-keyed demo vehicles (make|model|year; trim is priced, not matched) ----
   {
     spec_key: { make: 'Toyota', model: 'RAV4', year: 2021 },
     values: { wholesale: 2_250_000 },
     mileage_adjustment: { baseline_mileage: 35_000, cents_per_mile: 9 },
+    condition_adjustment: { certified: 95_000, new: 300_000 },
   },
   {
     spec_key: { make: 'Ford', model: 'F-150', year: 2019 },
     values: { wholesale: 2_600_000 },
     mileage_adjustment: { baseline_mileage: 55_000, cents_per_mile: 7 },
+    trim_adjustment: { xl: -60_000, xlt: 90_000, lariat: 320_000 },
   },
   {
     spec_key: { make: 'Honda', model: 'Civic', year: 2022 },
@@ -56,7 +67,7 @@ export const MANHEIM_DEFAULT_FIXTURES: readonly ValuationFixtureRow[] = [
     values: { wholesale: 780_000 },
   },
 
-  // ---- simulated error rows (D4; §4.1) ----
+  // ---- simulated error rows (§7.1) ----
   {
     spec_key: { make: 'BMW', model: 'X5', year: 2015 },
     error: 'provider_unavailable',

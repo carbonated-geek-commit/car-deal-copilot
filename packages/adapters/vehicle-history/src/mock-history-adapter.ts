@@ -5,6 +5,33 @@
  * docs/design/T-005.md §4. `getHistory` is a pure lookup + clock stamp:
  * never throws across the boundary, performs no I/O whatsoever (no HTTP, no
  * fs, no env reads), holds no state — same VIN in, same fixture out, always.
+ *
+ * v0.5 binding (T-013 §5 — no signature change, recorded guarantees):
+ *
+ * - INSTANCE → VIN HOP. History is requested for one specific car, but this
+ *   adapter is VIN-keyed, so a caller reaches it from a `VehicleInstance` via
+ *   `instance.vin`. That field is `Vin | undefined` (Q16: user-entered,
+ *   unvalidated, and ABSENT IS NORMAL) while `getHistory` takes `Vin`, so under
+ *   the repo's `strict` + `exactOptionalPropertyTypes` an un-narrowed
+ *   `instance.vin` is a COMPILE error. An instance with no VIN therefore yields
+ *   no history call and no `VehicleData` record at all — the compiler is the
+ *   enforcement, not a runtime guard (T-013 D10).
+ *
+ * - ASSEMBLE ONLY FROM SUCCESSFUL OBSERVATIONS (T-013 D9, ADR-005). A failed
+ *   `getHistory` must not be folded into a `VehicleData` as an empty or clean
+ *   result: `title_brands: []` means "this source answered: no brands", never
+ *   "we did not look". A missing input is UNEVALUABLE, never zero. History is a
+ *   separate, paid, mock-only feed, so its absence does not invalidate a
+ *   decode + recalls record — the record is simply assembled without `history`.
+ *
+ * - The syntactic VIN guard below is RETAINED and is not the VIN validation
+ *   Q16 forbids: it guards a fixture-table lookup keyed on a VIN the caller
+ *   already chose to supply, and it is not a decode and not a precondition for
+ *   accepting a `VehicleInstance` or producing a valuation (T-013 D11).
+ *
+ * mock_only: Carfax/AutoCheck exist here as source-id strings, filenames and
+ * doc comments only — no SDK, endpoint, credential or env read anywhere, so
+ * the `auth` error code is structurally unreachable.
  */
 
 import type {

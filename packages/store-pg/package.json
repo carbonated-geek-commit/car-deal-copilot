@@ -1,0 +1,11 @@
+{
+  "name": "@deal-copilot/store-pg",
+  "private": true,
+  "dependencies": {
+    "pg": "^8"
+  },
+  "devDependencies": {
+    "@types/pg": "^8"
+  },
+  "type": "module"
+}

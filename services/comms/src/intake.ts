@@ -2,9 +2,9 @@
  * Webhook intake — the T-001 §5.2 ack-then-queue decision table, nothing
  * else (design T-009 §2.1, §4.1, §5.1 — BINDING).
  *
- * specs/00: "webhooks ack immediately, all heavy work (transcription,
- * extraction) runs on the event bus. Provider timeouts must never drop a
- * dealer message."
+ * specs/00: "webhooks ack immediately, all heavy work (extraction, valuation
+ * refresh, notification) runs on the event bus. Provider timeouts must never
+ * drop a dealer message."
  *
  * Transport-neutral (D1): a plain async function returning a typed outcome
  * that ENCODES the HTTP status. The eventual HTTP shell (later epic) maps
@@ -12,9 +12,8 @@
  * this repo by constitution (CLAUDE.md invariant 2).
  *
  * The sequence is: sync-pure parse → durable enqueue → outcome. NO store
- * reads/writes, NO routing, NO extraction, NO transcription happens before
- * the ack decision (T-007 §5.2 seam rule: extraction never runs here, even
- * though it is cheap).
+ * reads/writes, NO routing, and NO extraction happens before the ack decision
+ * (T-012 seam rule: extraction never runs here, even though it is cheap).
  *
  * Observability note (§4.1): what an ingest log line MAY carry is source,
  * channel, provider_message_ref (or raw_payload_ref), and the outcome —
@@ -58,7 +57,7 @@ export type WebhookIngestOutcome =
 export interface WebhookIntake {
   /**
    * Sync-pure parse (adapter contract) → durable enqueue → outcome.
-   * Performs NO store reads/writes, NO routing, NO extraction, NO transcription.
+   * Performs NO store reads/writes, NO routing, and NO extraction.
    */
   ingest(channel: WebhookChannelKind, raw_payload: unknown): Promise<WebhookIngestOutcome>;
 }

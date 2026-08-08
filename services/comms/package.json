@@ -1,4 +1,5 @@
 {
   "name": "@deal-copilot/comms",
-  "private": true
+  "private": true,
+  "type": "module"
 }

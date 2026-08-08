@@ -1,0 +1,11 @@
+{
+  "name": "@deal-copilot/object-store",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3"
+  },
+  "type": "module"
+}

@@ -1,15 +1,43 @@
 /**
- * Per-channel text normalization (design §4.1).
+ * Text normalization profiles (docs/design/T-012.md §1.3, D1–D3).
  *
- * One shared rule core; channel is a normalization HINT only — it changes
- * text cleanup, never WHAT is extractable. After normalization the same
- * field rules run for all three channels (AC-3).
+ * The rule core below this module is channel-agnostic by CONSTRUCTION, not by
+ * convention: `channel` is mapped to a `NormalizationProfile` here and the
+ * channel value never travels further, so no rule can branch on it (AC-1).
+ * A profile changes text CLEANUP only — never WHAT is extractable.
  *
  * All transforms are deterministic, locale-free (en-US number forms fixed
- * for v1, design §4.3) and linear-time.
+ * for v1) and linear-time.
  */
 
 import type { MessageChannel } from '@core';
+
+/**
+ * How the text was PRODUCED, as far as cleanup is concerned. Deliberately not
+ * a channel: the rules see only a profile (D1).
+ */
+export type NormalizationProfile = 'plain' | 'email' | 'spoken';
+
+/**
+ * Channel → cleanup profile. Exhaustive by construction (`Record` over the
+ * spine's `MessageChannel`): adding a channel to the spine fails to compile
+ * here rather than silently falling back to another channel's cleanup — the
+ * exact failure mode that demoted `note` to the old `sms` fallback (D1).
+ *
+ * `note → spoken`: a note is speech retold in typing ("the buyer types what
+ * the dealer said, in their own words" — specs/01 consent posture, resolved
+ * 2026-08-07), so the colloquial-number cleanup follows the note channel.
+ * `call → plain` (D2): a v0.5 call message carries `call_meta`, not text, so
+ * there is no call text to clean; giving `call` a spoken profile would
+ * re-create a call-text path in spirit.
+ */
+export const PROFILE_BY_CHANNEL: Readonly<Record<MessageChannel, NormalizationProfile>> =
+  Object.freeze({
+    call: 'plain',
+    sms: 'plain',
+    email: 'email',
+    note: 'spoken',
+  });
 
 // ---- email: strip quoted reply chains + signatures ---------------------
 // A stale offer quoted back by the buyer must not re-extract as the
@@ -33,7 +61,11 @@ function stripEmailArtifacts(text: string): string {
   return out.join('\n');
 }
 
-// ---- call transcripts: disfluency cleanup + spoken numbers -------------
+// ---- spoken-form prose (typed notes): disfluency cleanup + spoken numbers ----
+// A buyer typing what the dealer said keeps the shape of speech: filler words
+// and spelled-out / colloquial numbers ("twenty nine grand", "four fifty a
+// month", "six point nine percent"). Cleaning those up is what makes the note
+// channel parse as well as a digit-form SMS.
 
 const FILLER_RE = /\b(?:um+|uh+|erm+|hmm+|mhm+|ahem)\b[,.]?/gi;
 
@@ -177,7 +209,7 @@ function joinSpelledNumbers(text: string): string {
   return result;
 }
 
-function normalizeTranscript(text: string): string {
+function normalizeSpokenForm(text: string): string {
   let t = text.replace(FILLER_RE, ' ');
   t = joinSpelledNumbers(t);
   // "29 thousand" / "29 grand" → 29000 (mixed digit + magnitude word)
@@ -193,14 +225,15 @@ function normalizeTranscript(text: string): string {
 // ---- entry point -------------------------------------------------------
 
 /**
- * Channel-hinted normalization. Deterministic, total: any string in, a
- * (possibly empty) string out — never throws.
+ * Profile-driven normalization. Deterministic, total: any string in, a
+ * (possibly empty) string out — never throws. No channel value reaches this
+ * function or anything below it (D1).
  */
-export function normalizeText(raw: string, channel: MessageChannel): string {
+export function normalizeText(raw: string, profile: NormalizationProfile): string {
   let t = raw.replace(/\r\n?/g, '\n');
-  if (channel === 'email') t = stripEmailArtifacts(t);
-  if (channel === 'call') t = normalizeTranscript(t);
-  // shared cleanup (all channels): entity/whitespace collapse, keep \n as a
+  if (profile === 'email') t = stripEmailArtifacts(t);
+  if (profile === 'spoken') t = normalizeSpokenForm(t);
+  // shared cleanup (every profile): entity/whitespace collapse, keep \n as a
   // sentence boundary for the rules' context windows
   t = t.replace(/&nbsp;/gi, ' ');
   t = t.replace(/[ \t\u00A0\u2007\u202F]+/g, ' ');

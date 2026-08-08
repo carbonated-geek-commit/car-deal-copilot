@@ -11,7 +11,8 @@
 
 import type { MessageChannel, Offer } from '@core';
 import type { Span } from './money.js';
-import { normalizeText } from './normalize.js';
+import type { NormalizationProfile } from './normalize.js';
+import { PROFILE_BY_CHANNEL, normalizeText } from './normalize.js';
 import { findFees } from './rules/fees.js';
 import { findMonthly } from './rules/monthly.js';
 import { findApr } from './rules/apr.js';
@@ -31,13 +32,15 @@ import { findSalePrice } from './rules/price.js';
 export type ExtractedOffer = Offer;
 
 /**
- * Channel-agnostic extraction input (AC-3). One entry point for all three
- * channels of Message.channel; `text` is whatever the Message carries:
- *   call  → Message.transcript
- *   sms   → Message.body
- *   email → Message.body
- * `channel` is a normalization HINT (design §4.1), never a router to
- * different extractors and never a carrier of provider knowledge.
+ * Channel-agnostic extraction input (T-012 AC-1). ONE entry point for all four
+ * v0.5 channels of `Message.channel`; `text` is whatever the Message carries:
+ *   note  → Message.body (buyer- or concierge-authored)
+ *   sms   → Message.body (verbatim)
+ *   email → Message.body (verbatim)
+ *   call  → normally ABSENT — a call message carries call_meta, not text
+ * `channel` selects a text-cleanup profile only (normalize.ts §1.3). It never
+ * routes to a different extractor, never gates which fields are extractable,
+ * and never carries provider knowledge.
  */
 export interface ExtractionInput {
   channel: MessageChannel;
@@ -65,12 +68,19 @@ export type ExtractionResult =
 export function extractOffer(input: ExtractionInput): ExtractionResult {
   // Totality guard (D4): hostile callers may hand us anything at runtime.
   const rawText = typeof input?.text === 'string' ? input.text : '';
-  const channel: MessageChannel =
-    input?.channel === 'call' || input?.channel === 'email' || input?.channel === 'sms'
-      ? input.channel
-      : 'sms'; // minimal normalization when the hint is unusable
 
-  const text = normalizeText(rawText, channel);
+  // Channel → cleanup profile, and no further (T-012 D1). An unrecognized
+  // runtime channel degrades to the least-transformative profile; it is NEVER
+  // rewritten to some other channel's value (D3 — the old `: 'sms'` fallback
+  // silently asserted a channel the caller did not send, which is how the v0.5
+  // `note` channel was being processed as a mislabelled SMS).
+  const rawChannel: unknown = input?.channel;
+  const profile: NormalizationProfile =
+    typeof rawChannel === 'string' && Object.hasOwn(PROFILE_BY_CHANNEL, rawChannel)
+      ? PROFILE_BY_CHANNEL[rawChannel as MessageChannel]
+      : 'plain';
+
+  const text = normalizeText(rawText, profile);
   if (text.length === 0) return { found: false };
 
   // Rule order matters for span claiming: labeled fees first (most

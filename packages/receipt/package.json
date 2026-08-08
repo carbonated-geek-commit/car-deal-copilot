@@ -1,4 +1,5 @@
 {
   "name": "@deal-copilot/receipt",
-  "private": true
+  "private": true,
+  "type": "module"
 }

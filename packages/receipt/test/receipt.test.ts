@@ -1,12 +1,12 @@
 /**
- * T-008 validation suite — receipt layer (docs/design/T-008.md §7, AC-1..AC-5).
+ * Receipt-layer suite, carried forward to the v0.5 surface (docs/design/T-012.md).
  *
- * Covers: append + stamping (R4), chronological read-back (R5), structural
- * append-only surface (AC-2), runtime immutability, idempotent dedupe (R6),
- * validation error paths (§5.1–§5.2), dossier assembly + stubbed export (R8,
- * §5.3), error-message PII hygiene (§5.1), identity routing (entries must
- * never land in or read from the wrong bundle), and the no-HTTP/webhook
- * surface rule (§5.4 — this package must own no webhook handler).
+ * Covers: append + stamping, chronological read-back, structural append-only
+ * surface (AC-8), runtime immutability, idempotent dedupe (D10), validation
+ * error paths (§4.2), dossier assembly + stubbed export (§4.4), error-message
+ * PII hygiene (§4.5), identity routing (entries must never land in or read
+ * from the wrong bundle), and the no-HTTP/webhook surface rule (§4.6 — this
+ * package must own no webhook handler).
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -16,16 +16,17 @@ import * as receiptApi from '@receipt';
 import {
   createDossierExporter,
   createInMemoryReceiptStore,
+  type CallMetaEntryInput,
   type DealDossier,
   type DossierExporter,
   type EmailEntryInput,
+  type NoteEntryInput,
   type ReceiptEntry,
   type ReceiptEntryInput,
   type ReceiptError,
   type ReceiptResult,
   type ReceiptStore,
   type SmsEntryInput,
-  type TranscriptEntryInput,
 } from '@receipt';
 
 // ---------------------------------------------------------------------------
@@ -39,10 +40,10 @@ const T3 = '2026-08-07T12:00:00.000Z';
 /** PII strings deliberately planted in fixtures; must never leak into ReceiptError.message. */
 const PII = {
   body: 'Out the door $21,500 — call me at 555-867-5309',
-  transcript: 'Dealer said the doc fee is non-negotiable, ask for Jim',
+  note: 'Jim said the doc fee is non-negotiable, ask for him at the desk',
   email: 'dealer.jim@shadymotors.example',
   subject: 'RE: your trade-in payoff 4111-1111',
-  recordingRef: 'rec/secret-customer-audio-key-9982',
+  party: '+1-555-867-5309 (Jim at Shady Motors)',
 };
 
 function makeClock(start = '2026-08-07T12:00:00.000Z') {
@@ -70,12 +71,20 @@ function unwrapErr<T>(result: ReceiptResult<T>): ReceiptError {
 }
 
 function sms(overrides: Partial<SmsEntryInput> = {}): SmsEntryInput {
-  return { kind: 'sms', direction: 'in', occurred_at: T1, body: PII.body, ...overrides };
+  return {
+    kind: 'sms',
+    author: 'dealer',
+    direction: 'in',
+    occurred_at: T1,
+    body: PII.body,
+    ...overrides,
+  };
 }
 
 function email(overrides: Partial<EmailEntryInput> = {}): EmailEntryInput {
   return {
     kind: 'email',
+    author: 'buyer',
     direction: 'out',
     occurred_at: T2,
     subject: PII.subject,
@@ -84,8 +93,28 @@ function email(overrides: Partial<EmailEntryInput> = {}): EmailEntryInput {
   };
 }
 
-function transcript(overrides: Partial<TranscriptEntryInput> = {}): TranscriptEntryInput {
-  return { kind: 'transcript', direction: 'in', occurred_at: T3, transcript: PII.transcript, ...overrides };
+/** The buyer's/operator's own written record — always `internal`, never dealer-authored (D6). */
+function note(overrides: Partial<NoteEntryInput> = {}): NoteEntryInput {
+  return {
+    kind: 'note',
+    author: 'buyer',
+    direction: 'internal',
+    occurred_at: T3,
+    body: PII.note,
+    ...overrides,
+  };
+}
+
+/** Call METADATA only — no audio pointer, no verbatim call text exists on this type (AC-7). */
+function callMeta(overrides: Partial<CallMetaEntryInput> = {}): CallMetaEntryInput {
+  return {
+    kind: 'call_meta',
+    author: 'concierge',
+    direction: 'out',
+    occurred_at: T3,
+    call_meta: { started_at: T3, duration_seconds: 412, party: PII.party },
+    ...overrides,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -93,14 +122,14 @@ function transcript(overrides: Partial<TranscriptEntryInput> = {}): TranscriptEn
 // ---------------------------------------------------------------------------
 
 describe('append + stamp', () => {
-  it('appends each of the four kinds and derives the channel from kind (R4)', async () => {
+  it('appends each of the four v0.5 kinds and derives the channel from kind (AC-5)', async () => {
     const { clock } = makeClock();
     const store = createInMemoryReceiptStore(clock);
     const cases: ReadonlyArray<[ReceiptEntryInput, string]> = [
-      [{ kind: 'recording_ref', direction: 'in', occurred_at: T1, recording_ref: PII.recordingRef }, 'call'],
-      [transcript(), 'call'],
+      [note(), 'note'],
       [sms(), 'sms'],
       [email(), 'email'],
+      [callMeta(), 'call'],
     ];
     for (const [input, expectedChannel] of cases) {
       const outcome = unwrap(await store.append('bundle-1', input));
@@ -108,6 +137,8 @@ describe('append + stamp', () => {
       expect(outcome.entry.channel).toBe(expectedChannel);
       expect(outcome.entry.kind).toBe(input.kind);
       expect(outcome.entry.direction).toBe(input.direction);
+      // AC-6: the author survives the append verbatim, never defaulted.
+      expect(outcome.entry.author).toBe(input.author);
     }
   });
 
@@ -127,7 +158,7 @@ describe('append + stamp', () => {
     const store = createInMemoryReceiptStore(makeClock().clock);
     expect(unwrap(await store.append('b', sms())).entry.seq).toBe(1);
     expect(unwrap(await store.append('b', email())).entry.seq).toBe(2);
-    expect(unwrap(await store.append('b', transcript())).entry.seq).toBe(3);
+    expect(unwrap(await store.append('b', callMeta())).entry.seq).toBe(3);
   });
 
   it('keeps seq sequences independent across bundles (identity routing)', async () => {
@@ -135,17 +166,24 @@ describe('append + stamp', () => {
     expect(unwrap(await store.append('deal-A', sms())).entry.seq).toBe(1);
     expect(unwrap(await store.append('deal-A', email())).entry.seq).toBe(2);
     expect(unwrap(await store.append('deal-B', sms())).entry.seq).toBe(1);
-    expect(unwrap(await store.append('deal-A', transcript())).entry.seq).toBe(3);
+    expect(unwrap(await store.append('deal-A', callMeta())).entry.seq).toBe(3);
     expect(unwrap(await store.append('deal-B', email())).entry.seq).toBe(2);
   });
 
-  it('preserves provider_message_ref and dedupe_key verbatim on the stored entry (R1/R6)', async () => {
+  it('preserves provider_message_ref and dedupe_key verbatim on a provider-originated entry (D9/D10)', async () => {
     const store = createInMemoryReceiptStore(makeClock().clock);
     const entry = unwrap(
       await store.append('b', sms({ provider_message_ref: 'twilio:SM123', dedupe_key: 'sms:SM123' })),
     ).entry;
-    expect(entry.provider_message_ref).toBe('twilio:SM123');
+    if (entry.kind !== 'sms') expect.fail('expected an sms entry');
+    else expect(entry.provider_message_ref).toBe('twilio:SM123');
     expect(entry.dedupe_key).toBe('sms:SM123');
+  });
+
+  it('a note carries no provider_message_ref field at all (D9 — no fabricated provenance)', async () => {
+    const store = createInMemoryReceiptStore(makeClock().clock);
+    const entry = unwrap(await store.append('b', note())).entry;
+    expect('provider_message_ref' in entry).toBe(false);
   });
 });
 
@@ -156,20 +194,20 @@ describe('append + stamp', () => {
 describe('chronological read-back', () => {
   it('reads back sorted by occurred_at ascending regardless of append order (R5)', async () => {
     const store = createInMemoryReceiptStore(makeClock().clock);
-    // Transcript completes AFTER the sms that followed the call — classic out-of-order append.
+    // The call log lands AFTER the sms that followed it — classic out-of-order append.
     await store.append('b', sms({ occurred_at: T2 }));
-    await store.append('b', transcript({ occurred_at: T1 }));
+    await store.append('b', callMeta({ occurred_at: T1, call_meta: { started_at: T1 } }));
     await store.append('b', email({ occurred_at: T3 }));
     const entries = unwrap(await store.read('b'));
     expect(entries.map((e) => e.occurred_at)).toEqual([T1, T2, T3]);
-    expect(entries.map((e) => e.kind)).toEqual(['transcript', 'sms', 'email']);
+    expect(entries.map((e) => e.kind)).toEqual(['call_meta', 'sms', 'email']);
   });
 
   it('breaks occurred_at ties by seq (append order), making order total and deterministic', async () => {
     const store = createInMemoryReceiptStore(makeClock().clock);
     await store.append('b', sms({ occurred_at: T1, body: 'first appended' }));
     await store.append('b', email({ occurred_at: T1 }));
-    await store.append('b', transcript({ occurred_at: T1 }));
+    await store.append('b', note({ occurred_at: T1 }));
     const entries = unwrap(await store.read('b'));
     expect(entries.map((e) => e.seq)).toEqual([1, 2, 3]);
   });
@@ -384,8 +422,8 @@ describe('validation', () => {
   it('empty payload for each kind → invalid_input, and nothing is written', async () => {
     const store = createInMemoryReceiptStore(makeClock().clock);
     const bads: ReceiptEntryInput[] = [
-      { kind: 'recording_ref', direction: 'in', occurred_at: T1, recording_ref: '  ' },
-      { kind: 'transcript', direction: 'in', occurred_at: T1, transcript: '' },
+      note({ body: '  ' }),
+      callMeta({ call_meta: { started_at: 'not-a-timestamp' } }),
       sms({ body: '' }),
       email({ body: '   ' }),
     ];
@@ -459,7 +497,7 @@ describe('dossier export', () => {
     const store = createInMemoryReceiptStore(makeClock('2026-08-07T14:00:00.000Z').clock);
     const exporter = createDossierExporter(store, makeClock('2026-08-07T20:00:00.000Z').clock);
     await store.append('deal-bundle-9', sms({ occurred_at: T2 }));
-    await store.append('deal-bundle-9', transcript({ occurred_at: T1 }));
+    await store.append('deal-bundle-9', note({ occurred_at: T1 }));
     await store.append('deal-bundle-9', email({ occurred_at: T3 }));
     return { store, exporter };
   }
@@ -526,7 +564,7 @@ describe('dossier export', () => {
 // ---------------------------------------------------------------------------
 
 describe('error message hygiene', () => {
-  it('no ReceiptError.message produced by any path contains fixture bodies, transcripts, subjects, phones, emails, or recording refs', async () => {
+  it('no ReceiptError.message produced by any path contains fixture bodies, note text, subjects, call parties, phones, or emails', async () => {
     const store = createInMemoryReceiptStore(makeClock().clock);
     const exporter = createDossierExporter(store, makeClock().clock);
     const messages: string[] = [];
@@ -539,15 +577,8 @@ describe('error message hygiene', () => {
     collect(await store.append('b', sms({ body: '' })));
     collect(await store.append('b', sms({ occurred_at: 'not-a-timestamp' })));
     collect(await store.append('b', email({ body: '  ' })));
-    collect(await store.append('b', transcript({ transcript: '' })));
-    collect(
-      await store.append('b', {
-        kind: 'recording_ref',
-        direction: 'in',
-        occurred_at: 'bogus',
-        recording_ref: PII.recordingRef,
-      }),
-    );
+    collect(await store.append('b', note({ body: '' })));
+    collect(await store.append('b', callMeta({ occurred_at: 'bogus' })));
     collect(await store.read(''));
     collect(await exporter.assemble(''));
     await store.append('b', sms());
@@ -558,10 +589,10 @@ describe('error message hygiene', () => {
     expect(messages.length).toBeGreaterThanOrEqual(10);
     const piiFragments = [
       PII.body,
-      PII.transcript,
+      PII.note,
       PII.email,
       PII.subject,
-      PII.recordingRef,
+      PII.party,
       '555-867-5309',
       '21,500',
       '4111-1111',

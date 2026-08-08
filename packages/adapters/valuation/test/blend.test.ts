@@ -1,160 +1,185 @@
 /**
- * T-003 tester — blend step (docs/design/T-003.md §6 blend tests 1–6; rules
- * D1–D3, §4.2, §4.3).
+ * T-013 tester — the blend step against the v0.5 spine
+ * (docs/design/T-013.md §2.3, §3.4, §7.2; AC-4, AC-5, AC-9; ADR-005, ADR-007).
  *
  * Kit-mandate touchpoints:
- * - Anti-corruption: the composite IS the one spine `ValuationAdapter`; the
- *   public export surface carries no provider-shaped type or value (AC-1).
- * - Async backbone (§4.4): this package exposes NO webhook-facing API — the
- *   export-surface test pins that; composite purity keeps at-least-once
- *   redelivery of `valuation.refresh.requested.v1` safe.
- * - Bus-readiness: a blended `ValuationSnapshot` JSON round-trips unchanged
- *   (payload of `valuation.refresh.completed.v1`).
+ * - AC-4: the wholesale vs trade-in vs retail spread survives, PER INSTANCE.
+ * - D6: a contributor naming a different `vehicle_instance_id` is DISCARDED,
+ *   never averaged — a blend is always of one specific car.
+ * - ADR-005: a band no survivor supplies is ABSENT, never 0 and never "not
+ *   triggered". Partial degradation is visible in `source`, not in a zero.
+ * - ADR-007: the `retail` band flows through the blend verbatim, so the flag
+ *   engine's `above_market` basis is this instance's own retail.
+ * - AC-5: the composite IS the one spine `ValuationAdapter`; the package's
+ *   runtime export surface carries nothing provider-shaped and no webhook.
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import type {
-  AdapterResult,
-  ValuationAdapter,
-  ValuationRequest,
-  ValuationSnapshot,
-} from '@core';
+import type { ValuationAdapter, ValuationRequest } from '@core';
 import * as api from '@adapters/valuation';
 import {
   BLEND_SOURCE_PREFIX,
-  KBB_DEFAULT_FIXTURES,
   KBB_MOCK_SOURCE,
-  MANHEIM_DEFAULT_FIXTURES,
   MANHEIM_MOCK_SOURCE,
   blendSnapshots,
   createBlendedValuationAdapter,
   createKbbMockAdapter,
   createManheimMockAdapter,
-  type ValuationFixtureRow,
 } from '@adapters/valuation';
+import {
+  ACCORD_VIN,
+  INSTANCE_ID,
+  OTHER_INSTANCE_ID,
+  T0,
+  T_NEW,
+  T_OLD,
+  clockAt,
+  expectFailure,
+  expectOk,
+  fakeAdapter,
+  instance,
+  request,
+  snapshot,
+  target,
+} from './helpers.js';
 
-const T_OLD = '2026-08-07T10:00:00.000Z';
-const T_NEW = '2026-08-07T12:00:00.000Z';
-
-const ACCORD_VIN = '1HGCV1F34LA123456';
-
-/** Minimal hand-rolled spine adapter — proves the composite accepts ANY ValuationAdapter. */
-const fakeAdapter = (
-  source: string,
-  result: (req: ValuationRequest) => AdapterResult<ValuationSnapshot>,
-): ValuationAdapter => ({
-  source,
-  getValuation: async (req) => result(req),
-});
-
-const okSnapshot = (
-  source: string,
-  values: ValuationSnapshot['values'],
-  fetched_at: string,
-): ValuationSnapshot => ({
-  vehicle: { vin: ACCORD_VIN },
-  values,
-  source,
-  fetched_at,
-});
-
-const defaultBlend = (kbbClock = () => T_NEW, manheimClock = () => T_OLD) =>
+const defaultBlend = (
+  kbbClock = clockAt(T_NEW),
+  manheimClock = clockAt(T_OLD),
+): ValuationAdapter =>
   createBlendedValuationAdapter({
     retail_trade_in: createKbbMockAdapter({ now: kbbClock }),
     wholesale: createManheimMockAdapter({ now: manheimClock }),
   });
 
-// ---------------------------------------------------------------- AC-3 / test 1
+// ------------------------------------------------------ AC-4: the full spread
 
-describe('composite — both sources ok (§4.3 row 1, §6 blend test 1)', () => {
-  it('blends into the wholesale vs trade-in vs retail view with full provenance', async () => {
-    const adapter = defaultBlend();
-    const res = await adapter.getValuation({ vehicle: { vin: ACCORD_VIN } });
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    const snap = res.value;
-    expect(snap.values.wholesale).toBe(1_700_000);
-    expect(snap.values.trade_in).toBe(1_850_000);
-    expect(snap.values.retail).toBe(2_150_000);
+describe('composite — both sources ok (§7.2 row 1)', () => {
+  it('blends into the wholesale / trade-in / private-party / retail view for ONE instance', async () => {
+    const snap = expectOk(await defaultBlend().getValuation(request()));
+    expect(snap.vehicle_instance_id).toBe(INSTANCE_ID);
+    expect(snap.wholesale).toBe(1_700_000);
+    expect(snap.trade_in).toBe(1_850_000);
+    expect(snap.private_party).toBe(2_000_000);
+    expect(snap.retail).toBe(2_150_000);
     expect(snap.source).toBe('blend(mock-kbb+mock-manheim)');
     expect(snap.source.startsWith(BLEND_SOURCE_PREFIX)).toBe(true);
-    // D3: blend is only as fresh as its stalest input.
-    expect(snap.fetched_at).toBe(T_OLD);
-    // spread ordering — the pro's daily bread (AC-3)
-    expect(snap.values.wholesale!).toBeLessThan(snap.values.trade_in!);
-    expect(snap.values.trade_in!).toBeLessThan(snap.values.retail!);
+    // D3: the blend is only as fresh as its stalest input.
+    expect(snap.captured_at).toBe(T_OLD);
   });
 
-  it('echoes vehicle and mileage from the request (§4.3)', async () => {
+  it('the spread ordering holds — wholesale < trade_in < private_party < retail', async () => {
+    const snap = expectOk(await defaultBlend().getValuation(request()));
+    expect(snap.wholesale as number).toBeLessThan(snap.trade_in as number);
+    expect(snap.trade_in as number).toBeLessThan(snap.private_party as number);
+    expect(snap.private_party as number).toBeLessThan(snap.retail as number);
+  });
+
+  it('the priceable attributes still move every band through the composite (AC-2)', async () => {
     const adapter = defaultBlend();
-    const req: ValuationRequest = {
-      vehicle: { make: 'Toyota', model: 'RAV4', year: 2021, trim: 'XLE' },
-      mileage: 41_000,
-    };
-    const res = await adapter.getValuation(req);
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    expect(res.value.vehicle).toEqual(req.vehicle);
-    expect(res.value.mileage).toBe(41_000);
+    const base = expectOk(await adapter.getValuation(request()));
+    const adjusted = expectOk(
+      await adapter.getValuation(
+        request(
+          target(),
+          instance({ vin: ACCORD_VIN, mileage: 55_000, condition: 'certified', trim: 'Touring' }),
+        ),
+      ),
+    );
+    // -80_000 + 80_000 + 140_000 = +140_000 on every band
+    expect(adjusted.wholesale).toBe((base.wholesale as number) + 140_000);
+    expect(adjusted.retail).toBe((base.retail as number) + 140_000);
   });
 
-  it('adapter.source is the blend id even before any call (D1)', () => {
+  it('the blended snapshot has exactly the flat spine fields — no vehicle{} / values{} / fetched_at', async () => {
+    const snap = expectOk(await defaultBlend().getValuation(request()));
+    expect(Object.keys(snap).sort()).toEqual(
+      [
+        'captured_at',
+        'private_party',
+        'retail',
+        'source',
+        'trade_in',
+        'vehicle_instance_id',
+        'wholesale',
+      ].sort(),
+    );
+  });
+
+  it('adapter.source is the blend id before any call, naming every WIRED role', () => {
     expect(defaultBlend().source).toBe('blend(mock-kbb+mock-manheim)');
   });
 
-  it('is itself exactly the one spine ValuationAdapter type (D1, AC-1)', () => {
+  it('is itself exactly the one spine ValuationAdapter type (AC-5)', () => {
     expectTypeOf(createBlendedValuationAdapter).returns.toEqualTypeOf<ValuationAdapter>();
+    expect(Object.keys(defaultBlend()).sort()).toEqual(['getValuation', 'source']);
   });
 
-  it('repeated calls are deeply equal — safe under at-least-once redelivery (§4.4)', async () => {
+  it('repeated calls are deeply equal — safe under at-least-once redelivery', async () => {
     const adapter = defaultBlend();
-    const req: ValuationRequest = { vehicle: { vin: ACCORD_VIN }, mileage: 50_000 };
+    const req = request(target(), instance({ vin: ACCORD_VIN, mileage: 50_000 }));
     expect(await adapter.getValuation(req)).toEqual(await adapter.getValuation(req));
   });
-});
 
-// ---------------------------------------------------------------- D2 / test 2
-
-describe('composite — partial degradation (D2, §4.3 row 2, §6 blend test 2)', () => {
-  it('wholesale source down (2015 BMW X5) → ok partial snapshot, source names survivor only', async () => {
-    const adapter = defaultBlend();
-    const res = await adapter.getValuation({ vehicle: { make: 'BMW', model: 'X5', year: 2015 } });
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    expect(res.value.values.trade_in).toBe(1_450_000);
-    expect(res.value.values.retail).toBe(1_720_000);
-    expect(res.value.values.wholesale).toBeUndefined();
-    expect(res.value.source).toBe('blend(mock-kbb)'); // provenance IS the degradation signal
-  });
-
-  it('retail/trade-in source down (2014 Audi A4) → wholesale-only partial snapshot', async () => {
-    const adapter = defaultBlend();
-    const res = await adapter.getValuation({ vehicle: { make: 'Audi', model: 'A4', year: 2014 } });
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    expect(res.value.values.wholesale).toBe(780_000);
-    expect(res.value.values.trade_in).toBeUndefined();
-    expect(res.value.values.retail).toBeUndefined();
-    expect(res.value.source).toBe('blend(mock-manheim)');
+  it('a blended snapshot JSON round-trips unchanged (bus payload)', async () => {
+    const snap = expectOk(await defaultBlend().getValuation(request()));
+    expect(JSON.parse(JSON.stringify(snap))).toEqual(snap);
   });
 });
 
-// ---------------------------------------------------------------- §4.3 row 3 / test 3
+// ------------------------------------------- ADR-005: partial ⇒ absent, not 0
 
-describe('composite — all sources fail (§4.3 row 3, §6 blend test 3)', () => {
-  it('2012 Jaguar XJ fails on both sides → ONE error, blend-id source, retryable OR, codes-only message', async () => {
-    const adapter = defaultBlend();
-    const res = await adapter.getValuation({ vehicle: { make: 'Jaguar', model: 'XJ', year: 2012 } });
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    // both retryable → among equals the retail_trade_in-role error wins
-    expect(res.error.code).toBe('provider_unavailable'); // KBB side's simulated code
-    expect(res.error.retryable).toBe(true);
-    expect(res.error.source).toBe('blend(mock-kbb+mock-manheim)');
-    expect(res.error.message).toContain('provider_unavailable');
-    expect(res.error.message).toContain('rate_limited');
+describe('composite — partial degradation (§7.2 row 2, ADR-005)', () => {
+  it('wholesale source down (2015 BMW X5) → ok partial; wholesale ABSENT, never 0', async () => {
+    const snap = expectOk(
+      await defaultBlend().getValuation(request(target('BMW', 'X5'), instance({ year: 2015 }))),
+    );
+    expect(snap.trade_in).toBe(1_450_000);
+    expect(snap.private_party).toBe(1_580_000);
+    expect(snap.retail).toBe(1_720_000);
+    expect('wholesale' in snap).toBe(false); // UNEVALUABLE, not zero
+    expect(snap.wholesale).toBeUndefined();
+    expect(snap.source).toBe('blend(mock-kbb)'); // provenance IS the degradation signal
+    expect(snap.captured_at).toBe(T_NEW); // only the KBB contributor survived
+    expect(snap.vehicle_instance_id).toBe(INSTANCE_ID);
   });
 
-  it('retryable error beats a terminal one even when the terminal error is the retail role', async () => {
+  it('retail/trade-in source down (2014 Audi A4) → wholesale-only partial; retail ABSENT', async () => {
+    const snap = expectOk(
+      await defaultBlend().getValuation(request(target('Audi', 'A4'), instance({ year: 2014 }))),
+    );
+    expect(snap.wholesale).toBe(780_000);
+    expect('trade_in' in snap).toBe(false);
+    expect('retail' in snap).toBe(false); // ADR-007 basis is UNEVALUABLE here
+    expect('private_party' in snap).toBe(false);
+    expect(snap.source).toBe('blend(mock-manheim)');
+  });
+
+  it('a degraded blend never fabricates a zero band that could read as "free car"', async () => {
+    const snap = expectOk(
+      await defaultBlend().getValuation(request(target('Audi', 'A4'), instance({ year: 2014 }))),
+    );
+    for (const band of ['trade_in', 'retail', 'private_party'] as const) {
+      expect(snap[band]).not.toBe(0);
+      expect(snap[band]).toBeUndefined();
+    }
+  });
+});
+
+// ------------------------------------------------------ §7.2 row 3: all failed
+
+describe('composite — all sources fail (§7.2 row 3)', () => {
+  it('2012 Jaguar XJ fails on both sides → ONE error, blend-id source, codes-only message', async () => {
+    const err = expectFailure(
+      await defaultBlend().getValuation(request(target('Jaguar', 'XJ'), instance({ year: 2012 }))),
+      'provider_unavailable', // both retryable → wired-role order decides
+      'blend(mock-kbb+mock-manheim)',
+    );
+    expect(err.message).toContain('retail_trade_in=provider_unavailable');
+    expect(err.message).toContain('wholesale=rate_limited');
+    expect(err.message).not.toMatch(/https?:\/\//i);
+  });
+
+  it('a retryable contributor beats a terminal one even when the terminal is the retail role', async () => {
     const adapter = createBlendedValuationAdapter({
       retail_trade_in: fakeAdapter('fake-retail', () => ({
         ok: false,
@@ -165,15 +190,15 @@ describe('composite — all sources fail (§4.3 row 3, §6 blend test 3)', () =>
         error: { code: 'rate_limited', retryable: true, source: 'fake-wholesale', message: 'x' },
       })),
     });
-    const res = await adapter.getValuation({ vehicle: { vin: ACCORD_VIN } });
+    const res = await adapter.getValuation(request());
     expect(res.ok).toBe(false);
     if (res.ok) return;
-    expect(res.error.code).toBe('rate_limited'); // retryable wins over terminal
-    expect(res.error.retryable).toBe(true); // OR of contributors
+    expect(res.error.code).toBe('rate_limited');
+    expect(res.error.retryable).toBe(true); // OR over contributors
     expect(res.error.source).toBe('blend(fake-retail+fake-wholesale)');
   });
 
-  it('both terminal → retail_trade_in-role code wins, retryable:false', async () => {
+  it('both terminal → the retail_trade_in role code wins, retryable:false (deterministic)', async () => {
     const adapter = createBlendedValuationAdapter({
       retail_trade_in: fakeAdapter('fake-retail', () => ({
         ok: false,
@@ -181,56 +206,281 @@ describe('composite — all sources fail (§4.3 row 3, §6 blend test 3)', () =>
       })),
       wholesale: fakeAdapter('fake-wholesale', () => ({
         ok: false,
-        error: { code: 'malformed_response', retryable: false, source: 'fake-wholesale', message: 'x' },
+        error: {
+          code: 'malformed_response',
+          retryable: false,
+          source: 'fake-wholesale',
+          message: 'x',
+        },
       })),
     });
-    const res = await adapter.getValuation({ vehicle: { vin: ACCORD_VIN } });
+    const res = await adapter.getValuation(request());
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error.code).toBe('not_found');
     expect(res.error.retryable).toBe(false);
   });
+
+  it('total failure is an error, NOT an all-bands-zero snapshot (ADR-005)', async () => {
+    const res = await defaultBlend().getValuation(
+      request(target('Jaguar', 'XJ'), instance({ year: 2012 })),
+    );
+    expect(res.ok).toBe(false);
+    expect('value' in res).toBe(false);
+  });
+
+  it('one slow/failing source never blocks the other — fan-out is concurrent', async () => {
+    let wholesaleStarted = false;
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: {
+        source: 'slow-retail',
+        getValuation: async (req: ValuationRequest) => {
+          await new Promise((r) => setTimeout(r, 20));
+          expect(wholesaleStarted).toBe(true); // wholesale ran while retail waited
+          return {
+            ok: true as const,
+            value: snapshot('slow-retail', { retail: 5 }, T0, req.instance.id),
+          };
+        },
+      },
+      wholesale: {
+        source: 'fast-wholesale',
+        getValuation: async (req: ValuationRequest) => {
+          wholesaleStarted = true;
+          return {
+            ok: true as const,
+            value: snapshot('fast-wholesale', { wholesale: 1 }, T0, req.instance.id),
+          };
+        },
+      },
+    });
+    const snap = expectOk(await adapter.getValuation(request()));
+    expect(snap.retail).toBe(5);
+    expect(snap.wholesale).toBe(1);
+  });
 });
 
-// ---------------------------------------------------------------- pure merge / test 4
+// ------------------------------------------------- D6: one specific car only
 
-describe('blendSnapshots — pure merge (D2/D3, §4.2, §6 blend test 4)', () => {
-  it('takes each field from the snapshot that supplies it', () => {
+describe('D6 / AC-1 — a blend is ALWAYS of one specific car', () => {
+  it('blendSnapshots discards a contributor naming a different vehicle_instance_id', () => {
     const merged = blendSnapshots([
-      okSnapshot('a', { trade_in: 100, retail: 200 }, T_NEW),
-      okSnapshot('b', { wholesale: 50 }, T_OLD),
-      okSnapshot('c', { private_party: 150 }, T_NEW),
+      snapshot('kbb', { retail: 100, trade_in: 90 }, T0, INSTANCE_ID),
+      snapshot('foreign', { wholesale: 50 }, T0, OTHER_INSTANCE_ID),
     ]);
-    expect(merged.values).toEqual({ wholesale: 50, trade_in: 100, retail: 200, private_party: 150 });
+    expect(merged.vehicle_instance_id).toBe(INSTANCE_ID);
+    expect(merged.retail).toBe(100);
+    expect('wholesale' in merged).toBe(false); // the other car's band never lands here
+    expect(merged.source).toBe('blend(kbb)'); // discarded contributor is absent from provenance
+  });
+
+  it('ADR-007: another car’s retail can never become this instance’s above_market basis', () => {
+    const merged = blendSnapshots([
+      snapshot('mine', { trade_in: 1_000_000 }, T0, INSTANCE_ID),
+      snapshot('other-car', { retail: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+    ]);
+    expect(merged.vehicle_instance_id).toBe(INSTANCE_ID);
+    expect(merged.retail).toBeUndefined();
+    expect('retail' in merged).toBe(false); // UNEVALUABLE beats a wrong number
+  });
+
+  it('the head always survives, so a non-empty input always yields a result', () => {
+    const merged = blendSnapshots([
+      snapshot('head', { retail: 7 }, T0, INSTANCE_ID),
+      snapshot('f1', { wholesale: 1 }, T0, 'x'),
+      snapshot('f2', { trade_in: 2 }, T0, 'y'),
+    ]);
+    expect(merged.vehicle_instance_id).toBe(INSTANCE_ID);
+    expect(merged.retail).toBe(7);
+    expect(merged.source).toBe('blend(head)');
+  });
+
+  it('a real composite always agrees on the instance, so nothing is ever discarded', async () => {
+    const snap = expectOk(await defaultBlend().getValuation(request()));
+    expect(snap.source).toBe('blend(mock-kbb+mock-manheim)');
+    expect(snap.vehicle_instance_id).toBe(INSTANCE_ID);
+  });
+
+  it('every in-repo source stamps req.instance.id, so the discard rule is never reached in practice', async () => {
+    for (const adapter of [
+      createKbbMockAdapter({ now: clockAt() }),
+      createManheimMockAdapter({ now: clockAt() }),
+    ]) {
+      const snap = expectOk(
+        await adapter.getValuation(request(target(), instance({ id: 'vi-q', vin: ACCORD_VIN }))),
+      );
+      expect(snap.vehicle_instance_id).toBe('vi-q');
+    }
+  });
+
+  it('composite: D6 filters against req.instance.id, so a rogue source neither evicts the honest one nor gets relabelled', async () => {
+    // The ADR-007 case the anti-corruption layer exists to absorb: a source
+    // answers about a car it was NOT asked about. It must be discarded against
+    // the REQUEST, not against whichever result happened to arrive first —
+    // otherwise the rogue becomes the head, the honest contributor is dropped
+    // as "foreign", and §3.4 stamps the rogue's retail with this instance's id,
+    // making another car's retail this car's above_market basis.
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: fakeAdapter('rogue-retail', () => ({
+        ok: true,
+        value: snapshot('rogue-retail', { retail: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+      })),
+      wholesale: fakeAdapter('honest-wholesale', (req) => ({
+        ok: true,
+        value: snapshot('honest-wholesale', { wholesale: 1_700_000 }, T0, req.instance.id),
+      })),
+    });
+    const snap = expectOk(await adapter.getValuation(request()));
+    expect(snap.vehicle_instance_id).toBe(INSTANCE_ID);
+    // The other car's retail never lands here — UNEVALUABLE beats a wrong number.
+    expect(snap.retail).toBeUndefined();
+    expect('retail' in snap).toBe(false);
+    // The honest contributor survives; `source` names exactly who contributed.
+    expect(snap.wholesale).toBe(1_700_000);
+    expect(snap.source).toBe('blend(honest-wholesale)');
+  });
+
+  it('composite: a rogue source is discarded even when it is not the head (order-independent)', async () => {
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: fakeAdapter('honest-retail', (req) => ({
+        ok: true,
+        value: snapshot('honest-retail', { retail: 2_400_000 }, T0, req.instance.id),
+      })),
+      wholesale: fakeAdapter('rogue-wholesale', () => ({
+        ok: true,
+        value: snapshot('rogue-wholesale', { wholesale: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+      })),
+    });
+    const snap = expectOk(await adapter.getValuation(request()));
+    expect(snap.vehicle_instance_id).toBe(INSTANCE_ID);
+    expect(snap.retail).toBe(2_400_000);
+    expect('wholesale' in snap).toBe(false); // absent, never 0 (ADR-005)
+    expect(snap.source).toBe('blend(honest-retail)');
+  });
+
+  it('composite: an ALL-foreign response is a FAILURE, not a foreign snapshot wearing this instance’s id', async () => {
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: fakeAdapter('rogue-a', () => ({
+        ok: true,
+        value: snapshot('rogue-a', { retail: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+      })),
+      wholesale: fakeAdapter('rogue-b', () => ({
+        ok: true,
+        value: snapshot('rogue-b', { wholesale: 8_888_888 }, T0, 'vi-some-third-car'),
+      })),
+    });
+    const res = await adapter.getValuation(request());
+    const err = expectFailure(res, 'malformed_response', 'blend(rogue-a+rogue-b)');
+    // Roles + codes only — no instance id, no band, no provider text (§7.1).
+    expect(err.message).toBe(
+      'all valuation sources failed: retail_trade_in=malformed_response, wholesale=malformed_response',
+    );
+    expect(err.message).not.toContain(OTHER_INSTANCE_ID);
+    expect(err.message).not.toContain('9999999');
+  });
+
+  it('composite: a rogue source counts as a contributor FAILURE alongside a genuine one', async () => {
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: fakeAdapter('rogue-a', () => ({
+        ok: true,
+        value: snapshot('rogue-a', { retail: 9_999_999 }, T0, OTHER_INSTANCE_ID),
+      })),
+      wholesale: fakeAdapter('down-b', () => ({
+        ok: false,
+        error: {
+          code: 'provider_unavailable',
+          retryable: true,
+          source: 'down-b',
+          message: 'simulated outage',
+        },
+      })),
+    });
+    const res = await adapter.getValuation(request());
+    // A retryable contributor's code wins over a terminal one (§7.2).
+    const err = expectFailure(res, 'provider_unavailable', 'blend(rogue-a+down-b)');
+    expect(err.message).toBe(
+      'all valuation sources failed: retail_trade_in=malformed_response, wholesale=provider_unavailable',
+    );
+  });
+
+  it('the composite stamps req.instance.id — the requested car is authoritative (§3.4)', async () => {
+    const adapter = createBlendedValuationAdapter({
+      retail_trade_in: createKbbMockAdapter({ now: clockAt() }),
+      wholesale: createManheimMockAdapter({ now: clockAt() }),
+    });
+    const snap = expectOk(
+      await adapter.getValuation(request(target(), instance({ id: 'vi-zzz', vin: ACCORD_VIN }))),
+    );
+    expect(snap.vehicle_instance_id).toBe('vi-zzz');
+  });
+});
+
+// ------------------------------------------------------ pure merge mechanics
+
+describe('blendSnapshots — pure merge (§2.3)', () => {
+  it('takes each band from the survivor that supplies it', () => {
+    const merged = blendSnapshots([
+      snapshot('a', { trade_in: 100, retail: 200 }, T_NEW),
+      snapshot('b', { wholesale: 50 }, T_OLD),
+      snapshot('c', { private_party: 150 }, T_NEW),
+    ]);
+    expect(merged.wholesale).toBe(50);
+    expect(merged.trade_in).toBe(100);
+    expect(merged.retail).toBe(200);
+    expect(merged.private_party).toBe(150);
     expect(merged.source).toBe('blend(a+b+c)');
-    expect(merged.fetched_at).toBe(T_OLD); // oldest contributor (D3)
+    expect(merged.captured_at).toBe(T_OLD); // oldest survivor
   });
 
-  it('field collision (mis-wired roles) → most recent fetched_at wins', () => {
+  it('band collision → the newest captured_at wins', () => {
     const merged = blendSnapshots([
-      okSnapshot('stale', { wholesale: 111 }, T_OLD),
-      okSnapshot('fresh', { wholesale: 222 }, T_NEW),
+      snapshot('stale', { wholesale: 111 }, T_OLD),
+      snapshot('fresh', { wholesale: 222 }, T_NEW),
     ]);
-    expect(merged.values.wholesale).toBe(222);
+    expect(merged.wholesale).toBe(222);
   });
 
-  it('field collision with equal fetched_at → earliest in input order wins (deterministic)', () => {
+  it('band collision with equal captured_at → earliest input order wins (deterministic)', () => {
     const merged = blendSnapshots([
-      okSnapshot('first', { wholesale: 111 }, T_NEW),
-      okSnapshot('second', { wholesale: 222 }, T_NEW),
+      snapshot('first', { wholesale: 111 }, T_NEW),
+      snapshot('second', { wholesale: 222 }, T_NEW),
     ]);
-    expect(merged.values.wholesale).toBe(111);
+    expect(merged.wholesale).toBe(111);
   });
 
-  it('single snapshot blends to itself (values, oldest = own timestamp)', () => {
-    const merged = blendSnapshots([okSnapshot('solo', { retail: 999 }, T_NEW)]);
-    expect(merged.values).toEqual({ retail: 999 });
-    expect(merged.fetched_at).toBe(T_NEW);
+  it('captured_at is the OLDEST survivor even when it supplies no band', () => {
+    const merged = blendSnapshots([
+      snapshot('rich', { retail: 1 }, T_NEW),
+      snapshot('empty', {}, T_OLD),
+    ]);
+    expect(merged.captured_at).toBe(T_OLD);
+    expect(merged.source).toBe('blend(rich+empty)');
+  });
+
+  it('a single snapshot blends to itself', () => {
+    const merged = blendSnapshots([snapshot('solo', { retail: 999 }, T_NEW)]);
+    expect(merged.retail).toBe(999);
+    expect(merged.captured_at).toBe(T_NEW);
     expect(merged.source).toBe('blend(solo)');
+    expect(merged.vehicle_instance_id).toBe(INSTANCE_ID);
   });
 
-  it('blending zero snapshots is a compile-time error (§4.2 — no runtime path)', () => {
-    const _typeOnly = () => {
+  it('an all-empty merge yields NO bands rather than zeros (ADR-005)', () => {
+    const merged = blendSnapshots([snapshot('a', {}, T0), snapshot('b', {}, T0)]);
+    expect(Object.keys(merged).sort()).toEqual(
+      ['captured_at', 'source', 'vehicle_instance_id'].sort(),
+    );
+  });
+
+  it('does not mutate its inputs', () => {
+    const inputs = [snapshot('a', { retail: 1 }, T0), snapshot('b', { wholesale: 2 }, T0)] as const;
+    const before: unknown = JSON.parse(JSON.stringify(inputs));
+    blendSnapshots([inputs[0], inputs[1]]);
+    expect(JSON.parse(JSON.stringify(inputs))).toEqual(before);
+  });
+
+  it('blending zero snapshots is a COMPILE error — there is no runtime path', () => {
+    const _typeOnly = (): void => {
       // @ts-expect-error — non-empty tuple parameter forbids an empty array
       blendSnapshots([]);
     };
@@ -238,33 +488,50 @@ describe('blendSnapshots — pure merge (D2/D3, §4.2, §6 blend test 4)', () =>
   });
 });
 
-// ---------------------------------------------------------------- D9 third slot
+// ------------------------------------- Q15 / D5: the third slot stays unwired
 
-describe('composite — open private_party slot (D9)', () => {
-  it('a wired third source contributes private_party and joins the provenance', async () => {
-    const pp = fakeAdapter('fake-pp', () => ({
+describe('AC-9 / D5 — the private_party role is DECLARED BUT UNWIRED', () => {
+  it('the default composition wires exactly two roles; private-party rides on the KBB band', async () => {
+    const snap = expectOk(await defaultBlend().getValuation(request()));
+    expect(snap.source).toBe('blend(mock-kbb+mock-manheim)');
+    // Q15: the private-party number is present and it came from the KBB mock.
+    expect(snap.private_party).toBe(2_000_000);
+    const kbbOnly = expectOk(
+      await createKbbMockAdapter({ now: clockAt() }).getValuation(request()),
+    );
+    expect(kbbOnly.private_party).toBe(snap.private_party);
+  });
+
+  it('the slot is optional in the type and a wired third source joins provenance', async () => {
+    const pp = fakeAdapter('fake-pp', (req) => ({
       ok: true,
-      value: okSnapshot('fake-pp', { private_party: 1_800_000 }, T_NEW),
+      value: snapshot('fake-pp', { private_party: 1_800_000 }, T_NEW, req.instance.id),
     }));
     const adapter = createBlendedValuationAdapter({
-      retail_trade_in: createKbbMockAdapter({ now: () => T_NEW }),
-      wholesale: createManheimMockAdapter({ now: () => T_NEW }),
+      retail_trade_in: createKbbMockAdapter({ now: clockAt(T_NEW) }),
+      wholesale: createManheimMockAdapter({ now: clockAt(T_NEW) }),
       private_party: pp,
     });
     expect(adapter.source).toBe('blend(mock-kbb+mock-manheim+fake-pp)');
-    const res = await adapter.getValuation({ vehicle: { vin: ACCORD_VIN } });
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    expect(res.value.values.private_party).toBe(1_800_000);
-    expect(res.value.values.wholesale).toBe(1_700_000);
-    expect(res.value.source).toBe('blend(mock-kbb+mock-manheim+fake-pp)');
+    const snap = expectOk(await adapter.getValuation(request()));
+    // Same captured_at across all three ⇒ earliest input order wins the collision.
+    expect(snap.private_party).toBe(2_000_000);
+    expect(snap.wholesale).toBe(1_700_000);
+    expect(snap.source).toBe('blend(mock-kbb+mock-manheim+fake-pp)');
+  });
+
+  it('nothing in this package can fill the slot: no comps/marketplace factory is exported', () => {
+    const exported = Object.keys(api);
+    for (const name of exported) {
+      expect(name).not.toMatch(/comps|marketplace|facebook|craigslist|scrape/i);
+    }
   });
 });
 
-// ---------------------------------------------------------------- test 5: surface
+// -------------------------------------------------- AC-5: the export boundary
 
-describe('public API surface — anti-corruption & no webhook path (AC-1, §4.4, §6 blend test 5)', () => {
-  it('runtime exports are exactly the designed set — nothing provider-shaped, no handlers', () => {
+describe('public API surface — anti-corruption & no webhook path (AC-5)', () => {
+  it('runtime exports are exactly the designed set', () => {
     expect(Object.keys(api).sort()).toEqual(
       [
         'BLEND_SOURCE_PREFIX',
@@ -280,50 +547,22 @@ describe('public API surface — anti-corruption & no webhook path (AC-1, §4.4,
     );
   });
 
+  it('no internal narrowing helper or provider shape leaks through the alias', () => {
+    const surface = api as unknown as Record<string, unknown>;
+    for (const forbidden of [
+      'createFixtureMockAdapter',
+      'isRetryable',
+      'normalizeVin',
+      'KbbResponse',
+      'ManheimResponse',
+      'MmrQuote',
+    ]) {
+      expect(surface[forbidden]).toBeUndefined();
+    }
+  });
+
   it('provider names surface ONLY as mock-* provenance ids (mock_only posture)', () => {
     expect(KBB_MOCK_SOURCE).toBe('mock-kbb');
     expect(MANHEIM_MOCK_SOURCE).toBe('mock-manheim');
-  });
-});
-
-// ---------------------------------------------------------------- test 6: bus-ready
-
-describe('serialization — bus-ready snapshot (§6 blend test 6)', () => {
-  it('a blended ValuationSnapshot JSON round-trips unchanged', async () => {
-    const adapter = defaultBlend();
-    const res = await adapter.getValuation({ vehicle: { vin: ACCORD_VIN }, mileage: 47_500 });
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    const roundTripped: unknown = JSON.parse(JSON.stringify(res.value));
-    expect(roundTripped).toEqual(res.value);
-  });
-});
-
-// ---------------------------------------------------------------- cross-fixture spread
-
-describe('default fixture coherence across sources (§3, §6 mock test 6)', () => {
-  const rowKey = (row: ValuationFixtureRow): string =>
-    row.vin !== undefined
-      ? `vin:${row.vin.trim().toUpperCase()}`
-      : `spec:${row.spec_key!.make.trim().toLowerCase()}|${row.spec_key!.model.trim().toLowerCase()}|${row.spec_key!.year}`;
-
-  it('every vehicle valued on both sides satisfies wholesale < trade_in < retail', () => {
-    const manheimByKey = new Map(MANHEIM_DEFAULT_FIXTURES.map((r) => [rowKey(r), r]));
-    let shared = 0;
-    for (const kbbRow of KBB_DEFAULT_FIXTURES) {
-      if (kbbRow.values === undefined) continue;
-      const twin = manheimByKey.get(rowKey(kbbRow));
-      if (twin?.values === undefined) continue;
-      shared += 1;
-      expect(twin.values.wholesale!).toBeLessThan(kbbRow.values.trade_in!);
-      expect(kbbRow.values.trade_in!).toBeLessThan(kbbRow.values.retail!);
-    }
-    expect(shared).toBeGreaterThanOrEqual(6); // the demo set actually overlaps
-  });
-
-  it('every default-fixture vehicle appears in BOTH files (blend view meaningful for demos)', () => {
-    const kbbKeys = new Set(KBB_DEFAULT_FIXTURES.map(rowKey));
-    const manheimKeys = new Set(MANHEIM_DEFAULT_FIXTURES.map(rowKey));
-    expect([...kbbKeys].sort()).toEqual([...manheimKeys].sort());
   });
 });

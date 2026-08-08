@@ -1,27 +1,34 @@
 /**
- * T-009 tester — idempotency / dedupe under at-least-once redelivery
- * (design §5.4: ledger belt + keyed-write braces; T-001 §5.3).
+ * T-014 tester — idempotency / dedupe under at-least-once redelivery
+ * (design §3.2/§3.4/§3.5: ledger belt + keyed-write braces; T-001 §5.3).
+ * Re-based to v0.5; assertions unchanged in substance — "idempotency/dedupe
+ * exactly as built" is what this task promised to preserve.
  *
  *   - provider redelivery of the same webhook (before AND after processing)
  *     never double-threads, never double-extracts, never double-rolls-up;
  *   - a redelivered bus event with the same idempotency_key is a no-op;
- *   - an adversarial duplicate with a DIFFERENT key but the same message
- *     ref is caught by the keyed writes (fill-once — braces, not just belt).
+ *   - an adversarial duplicate with a DIFFERENT key but the same message ref
+ *     is caught by the keyed writes (fill-once — braces, not just belt).
  */
 
 import { describe, expect, it } from 'vitest';
-import type { DealerThread, SpineEvent } from '@core';
-import { IDENTITY_A, makeDeal, makeHarness, smsPayload, T1 } from './fixtures/harness.js';
+import type { SpineEvent } from '@core';
+import {
+  DEALERSHIP_A,
+  IDENTITY_A,
+  makeHarness,
+  onlyThread,
+  seedDeal,
+  smsPayload,
+  T1,
+} from './fixtures/harness.js';
 
 const PRICE_TEXT = 'The price is $23,500 for this one.';
 
-const onlyThread = (h: ReturnType<typeof makeHarness>): DealerThread =>
-  h.service.read.getDeal('deal-a')!.dealer_threads[0]!;
-
-describe('redelivery dedupe (§5.4)', () => {
+describe('redelivery dedupe', () => {
   it('same webhook ingested twice before draining: one message, one extracted_offer, one rollup', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    seedDeal(h, 'deal-a', IDENTITY_A);
     const payload = smsPayload({ ref: 'sms-1', body: PRICE_TEXT, at: T1 });
 
     expect((await h.service.intake.ingest('telephony', payload)).http_status).toBe(200);
@@ -30,14 +37,18 @@ describe('redelivery dedupe (§5.4)', () => {
 
     const thread = onlyThread(h);
     expect(thread.messages).toHaveLength(1);
-    expect(thread.messages[0]!.extracted_offer).toStrictEqual({ fees: [], flags: [], sale_price: 23_500_00 });
+    expect(thread.messages[0]!.extracted_offer).toStrictEqual({
+      fees: [],
+      flags: [],
+      sale_price: 23_500_00,
+    });
     expect(thread.current_offer).toStrictEqual({ fees: [], flags: [], sale_price: 23_500_00 });
     expect(h.queue.deadLetters).toHaveLength(0);
   });
 
   it('redelivery AFTER full processing (slow provider retry): still exactly one of everything', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    seedDeal(h, 'deal-a', IDENTITY_A);
     const payload = smsPayload({ ref: 'sms-1', body: PRICE_TEXT, at: T1 });
 
     await h.service.intake.ingest('telephony', payload);
@@ -54,8 +65,11 @@ describe('redelivery dedupe (§5.4)', () => {
 
   it('a redelivered downstream event (same idempotency_key) is a no-op', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
-    await h.service.intake.ingest('telephony', smsPayload({ ref: 'sms-1', body: PRICE_TEXT, at: T1 }));
+    seedDeal(h, 'deal-a', IDENTITY_A);
+    await h.service.intake.ingest(
+      'telephony',
+      smsPayload({ ref: 'sms-1', body: PRICE_TEXT, at: T1 }),
+    );
     await h.queue.drain();
     const before = onlyThread(h);
 
@@ -68,8 +82,8 @@ describe('redelivery dedupe (§5.4)', () => {
       idempotency_key: 'deal-a:sms-1:extraction-complete',
       payload: {
         deal_id: 'deal-a',
-        dealer_id: before.dealer_id,
-        provider_message_ref: 'sms-1',
+        dealership_id: before.dealership_id,
+        message_ref: 'sms-1',
         offer: { fees: [], flags: [], sale_price: 23_500_00 },
       },
     };
@@ -82,8 +96,11 @@ describe('redelivery dedupe (§5.4)', () => {
 
   it('adversarial duplicate with a DIFFERENT key but same ref: fill-once braces hold — no overwrite, no re-rollup', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
-    await h.service.intake.ingest('telephony', smsPayload({ ref: 'sms-1', body: PRICE_TEXT, at: T1 }));
+    seedDeal(h, 'deal-a', IDENTITY_A);
+    await h.service.intake.ingest(
+      'telephony',
+      smsPayload({ ref: 'sms-1', body: PRICE_TEXT, at: T1 }),
+    );
     await h.queue.drain();
     const before = onlyThread(h);
 
@@ -97,8 +114,8 @@ describe('redelivery dedupe (§5.4)', () => {
       idempotency_key: 'deal-a:sms-1:extraction-complete:forged',
       payload: {
         deal_id: 'deal-a',
-        dealer_id: before.dealer_id,
-        provider_message_ref: 'sms-1',
+        dealership_id: before.dealership_id,
+        message_ref: 'sms-1',
         offer: { fees: [], flags: [], sale_price: 1_00 }, // would be a catastrophic overwrite
       },
     };
@@ -111,9 +128,9 @@ describe('redelivery dedupe (§5.4)', () => {
     expect(h.queue.deadLetters).toHaveLength(0); // already_set → done, not an error
   });
 
-  it('thread creation is idempotent: redelivered first-contact never creates a second thread (D6)', async () => {
+  it('thread creation is idempotent: redelivered first-contact never creates a second thread', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    seedDeal(h, 'deal-a', IDENTITY_A);
     const payload = smsPayload({ ref: 'sms-1', body: 'hello there', at: T1 });
 
     await h.service.intake.ingest('telephony', payload);
@@ -123,7 +140,8 @@ describe('redelivery dedupe (§5.4)', () => {
 
     const deal = h.service.read.getDeal('deal-a')!;
     expect(deal.dealer_threads).toHaveLength(1);
-    // Deterministic dealer_id derived from the normalized sender contact.
-    expect(deal.dealer_threads[0]!.dealer_id).toBe('dealer:sms:+15550200001');
+    // The thread's key is the KNOWN dealership_id the account bound — never a
+    // value this service synthesised from a phone number (D9/D10).
+    expect(deal.dealer_threads[0]!.dealership_id).toBe(DEALERSHIP_A);
   });
 });

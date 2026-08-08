@@ -1,29 +1,35 @@
 /**
- * T-009 tester — identity-routing correctness (AC-3; design D5/D6, §8
- * invariant 1).
+ * T-014 tester — identity-routing correctness (AC-13; design §3.2, §4 routing
+ * row). Re-based to v0.5; the assertions are the T-009 ones, unchanged in
+ * substance, because "identity routing exactly as built" is what this task
+ * promised to preserve.
  *
  * The product promise under test: a message must NEVER thread to the wrong
- * deal/user. Adversarial cases:
- *   - unknown identity → unrouted holding area, never a guessed deal, never
- *     a drop (record held whole, replayable);
+ * deal or the wrong account. Adversarial cases:
+ *   - unknown identity → unrouted holding area, never a guessed deal, never a
+ *     drop (the record is held whole and replayable);
  *   - near-miss identity (adjacent number) → NON-match;
- *   - two deals contacted by the SAME dealer → each message lands only on
+ *   - two deals contacted by the SAME dealership → each message lands only on
  *     the deal whose identity was addressed;
  *   - burned deal whose identity was re-bound → new inbound goes to the new
  *     deal only; the burned deal's history is untouched;
- *   - normalization is identical at bind and resolve (formatted vs E.164),
- *     but never guesses (missing country code is a non-match).
+ *   - normalization is identical at bind and at resolve (formatted vs E.164)
+ *     but never guesses (a missing country code is a non-match).
  */
 
 import { describe, expect, it } from 'vitest';
 import type { Deal } from '@core';
 import {
+  CONTACT_A,
   DEALER_EMAIL,
   DEALER_PHONE,
+  DEALERSHIP_A,
   IDENTITY_A,
   IDENTITY_B,
   makeDeal,
   makeHarness,
+  makeThread,
+  seedDeal,
   smsPayload,
   emailPayload,
   T0,
@@ -31,13 +37,17 @@ import {
   T2,
 } from './fixtures/harness.js';
 
-describe('identity routing — never the wrong deal (AC-3, D5)', () => {
+describe('identity routing — never the wrong deal (AC-13)', () => {
   it('unknown identity: message goes to the unrouted holding area, held whole — no deal touched', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
-    h.store.putDeal(makeDeal('deal-b', IDENTITY_B));
+    seedDeal(h, 'deal-a', IDENTITY_A);
+    seedDeal(h, 'deal-b', IDENTITY_B);
 
-    const payload = smsPayload({ ref: 'sms-x', toPhone: '+15550109999', body: 'The price is $9,000.' });
+    const payload = smsPayload({
+      ref: 'sms-x',
+      toPhone: '+15550109999',
+      body: 'The price is $9,000.',
+    });
     const outcome = await h.service.intake.ingest('telephony', payload);
     expect(outcome.http_status).toBe(200); // parse succeeded; routing is a consumer concern
     await h.queue.drain();
@@ -46,6 +56,7 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
     expect(unrouted).toHaveLength(1);
     expect(unrouted[0]!.reason).toBe('no_identity_match');
     expect(unrouted[0]!.inbound).toStrictEqual(payload); // held whole — replayable
+    expect(unrouted[0]!.deal_id).toBeUndefined(); // no deal was guessed
     expect(h.service.read.getDeal('deal-a')!.dealer_threads).toHaveLength(0);
     expect(h.service.read.getDeal('deal-b')!.dealer_threads).toHaveLength(0);
     expect(h.queue.deadLetters).toHaveLength(0); // held, not dead-lettered — a valid terminal outcome
@@ -62,7 +73,7 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
 
   it('near-miss identity (one digit off from a bound number) is a NON-match — exact match only', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A)); // +15550100001
+    seedDeal(h, 'deal-a', IDENTITY_A); // +15550100001
 
     await h.service.intake.ingest(
       'telephony',
@@ -74,19 +85,31 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
     expect(h.service.read.listUnrouted()).toHaveLength(1);
   });
 
-  it('two deals, same dealer: each message threads ONLY to the deal whose identity was addressed', async () => {
+  it('two deals, same dealership: each message threads ONLY to the deal whose identity was addressed', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
-    h.store.putDeal(makeDeal('deal-b', IDENTITY_B));
+    seedDeal(h, 'deal-a', IDENTITY_A);
+    seedDeal(h, 'deal-b', IDENTITY_B);
 
-    // The SAME dealer phone contacts both of our identities.
+    // The SAME dealership phone contacts both of our identities.
     await h.service.intake.ingest(
       'telephony',
-      smsPayload({ ref: 'to-a', toPhone: IDENTITY_A.phone_number!, fromPhone: DEALER_PHONE, body: 'For deal A: the price is $20,000.', at: T1 }),
+      smsPayload({
+        ref: 'to-a',
+        toPhone: IDENTITY_A.phone_number!,
+        fromPhone: DEALER_PHONE,
+        body: 'For deal A: the price is $20,000.',
+        at: T1,
+      }),
     );
     await h.service.intake.ingest(
       'telephony',
-      smsPayload({ ref: 'to-b', toPhone: IDENTITY_B.phone_number!, fromPhone: DEALER_PHONE, body: 'For deal B: the price is $21,000.', at: T2 }),
+      smsPayload({
+        ref: 'to-b',
+        toPhone: IDENTITY_B.phone_number!,
+        fromPhone: DEALER_PHONE,
+        body: 'For deal B: the price is $21,000.',
+        at: T2,
+      }),
     );
     await h.queue.drain();
 
@@ -95,7 +118,7 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
     expect(dealA.dealer_threads).toHaveLength(1);
     expect(dealB.dealer_threads).toHaveLength(1);
 
-    // Same dealer, two isolated threads — one per deal, no cross-pollination.
+    // Same dealership, two isolated threads — one per deal, no cross-pollination.
     const msgsA = dealA.dealer_threads[0]!.messages;
     const msgsB = dealB.dealer_threads[0]!.messages;
     expect(msgsA).toHaveLength(1);
@@ -117,18 +140,19 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
       status: 'burned',
       burned_at: '2026-08-06T00:00:00.000Z',
       dealer_threads: [
-        {
-          dealer_id: 'dealer:sms:' + DEALER_PHONE,
-          dealer_name: DEALER_PHONE,
-          contact: { phone: DEALER_PHONE },
-          messages: [{ channel: 'sms', direction: 'in', body: 'old world', timestamp: T0 }],
-        },
+        makeThread({
+          working_with: CONTACT_A,
+          messages: [
+            { channel: 'sms', direction: 'in', author: 'dealer', body: 'old world', timestamp: T0 },
+          ],
+        }),
       ],
     };
     h.store.putDeal(burned);
 
-    // Identity X is recycled onto deal B (authoritative re-bind).
-    h.store.putDeal(makeDeal('deal-b'));
+    // Identity X is recycled onto deal B (authoritative re-bind), and deal B's
+    // own account-private contact index is bound for the same dealership.
+    seedDeal(h, 'deal-b');
     h.store.bindIdentity('deal-b', IDENTITY_A);
 
     await h.service.intake.ingest(
@@ -152,6 +176,10 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
   it('normalization is identical at bind and resolve: formatted bind matches E.164 inbound', async () => {
     const h = makeHarness();
     h.store.putDeal(makeDeal('deal-a'));
+    h.store.bindThreadContact('deal-a', DEALERSHIP_A, {
+      phone: DEALER_PHONE,
+      email: DEALER_EMAIL,
+    });
     h.store.bindIdentity('deal-a', {
       identity_id: 'identity-a',
       phone_number: '+1 (555) 010-0001', // formatted at bind
@@ -170,7 +198,7 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
 
   it('normalization never guesses: a match missing the country code is a NON-match', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A)); // bound as +15550100001
+    seedDeal(h, 'deal-a', IDENTITY_A); // bound as +15550100001
 
     await h.service.intake.ingest(
       'telephony',
@@ -182,19 +210,42 @@ describe('identity routing — never the wrong deal (AC-3, D5)', () => {
     expect(h.service.read.listUnrouted()).toHaveLength(1);
   });
 
-  it('the same dealer texting and emailing one deal threads by contact, not provider identity logic', async () => {
+  it('the same dealership texting AND emailing one deal threads onto ONE thread (per-deal contact index)', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    // Both contact points are bound to the SAME known dealership_id inside
+    // this deal — that binding, not a guess about phone/email ownership, is
+    // what joins the two transports onto one relationship (D9).
+    seedDeal(h, 'deal-a', IDENTITY_A);
 
     await h.service.intake.ingest('telephony', smsPayload({ ref: 's-1', fromPhone: DEALER_PHONE }));
     await h.service.intake.ingest('email', emailPayload({ ref: 'e-1', fromEmail: DEALER_EMAIL }));
     await h.queue.drain();
 
     const deal = h.service.read.getDeal('deal-a')!;
-    // Distinct contact points → distinct (deterministic) threads; no guessing
-    // that a phone and an email are the same dealer.
-    expect(deal.dealer_threads).toHaveLength(2);
-    const ids = deal.dealer_threads.map((t) => t.dealer_id).sort();
-    expect(ids).toStrictEqual(['dealer:email:' + DEALER_EMAIL, 'dealer:sms:' + DEALER_PHONE]);
+    expect(deal.dealer_threads).toHaveLength(1);
+    expect(deal.dealer_threads[0]!.dealership_id).toBe(DEALERSHIP_A);
+    expect(deal.dealer_threads[0]!.messages).toHaveLength(2);
+  });
+
+  it('two dealerships on one deal stay on separate threads — no merging by transport', async () => {
+    const h = makeHarness();
+    seedDeal(h, 'deal-a', IDENTITY_A);
+    // A second, independently known dealership contacting the same buyer.
+    h.store.bindThreadContact('deal-a', 'dealership-second-city-autos', {
+      phone: '+15550200002',
+    });
+
+    await h.service.intake.ingest('telephony', smsPayload({ ref: 's-1', fromPhone: DEALER_PHONE }));
+    await h.service.intake.ingest(
+      'telephony',
+      smsPayload({ ref: 's-2', fromPhone: '+15550200002' }),
+    );
+    await h.queue.drain();
+
+    const ids = h.service.read
+      .getDeal('deal-a')!
+      .dealer_threads.map((t) => t.dealership_id)
+      .sort();
+    expect(ids).toStrictEqual(['dealership-second-city-autos', DEALERSHIP_A].sort());
   });
 });

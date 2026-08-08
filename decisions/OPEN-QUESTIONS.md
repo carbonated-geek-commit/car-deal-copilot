@@ -145,3 +145,16 @@ The buyer writes notes and the extractor parses them (it is channel-agnostic, so
 ### Q22 — Ratify the `Message` shape
 **Context:** specs/00 carries `Message` marked "chief-proposed, awaiting ratification" (channel += `note`, `direction` += `internal`, new `author`, new `call_meta`), while specs/01's concierge honesty guarantee and the whole note-capture path already depend on it.
 **ANSWER:** **RATIFIED** — 2026-08-07 (Corban). `Message` carries `channel` (call|sms|email|note), `direction` (in|out|internal), `author` (dealer|buyer|concierge), `body`, optional `call_meta`, `timestamp`, optional `extracted_offer`.
+
+### Q23 — Comms ports are synchronous; Postgres is not *(logged, not blocking)*
+**Context:** T-017 could not implement Postgres repositories without either changing the Epic-1 comms port signatures (forbidden by its own acceptance criteria) or absorbing the mismatch in a hydrate-then-serve unit of work.
+**ANSWER:** Resolved by chief as **ADR-010** — T-017 deferred; the ports go async when Postgres repositories are actually built. Not blocking: ADR-008 makes the in-memory store the PoC default, so the working website does not depend on it. Logged here per Corban's standing instruction to record non-interface-breaking questions and keep building.
+
+### Q24 — Flag thresholds are not wired into the running API *(logged, not blocking)*
+**Observed 2026-08-08** by driving the live API end-to-end. A buyer note quoting 84 months returns `payment_packing: "not_evaluated"` where it should FIRE. Extraction, rollup, and the unevaluable-vs-fired distinction all work; what is missing is that the war-room assessment is not handed a `FlagEngineConfig` (stretched-term threshold, APR tolerance, fee fair-value caps), so evaluable flags report `not_evaluated` instead of a verdict.
+**Why it is not a defect in the flag engine:** the engine requires its thresholds to be injected by design (T-002 D1 — business constants are the caller's to cite, not the engine's to invent). The gap is composition, not logic.
+**Consequence if left:** the war room shows an offer and its unevaluable set but never actually flags payment packing, junk fees, or over-walkaway — i.e. the headline feature is silent.
+**ANSWER:** Chief — schedule as the first task of the next epic (wire a default `FlagEngineConfig` into the API composition and surface it in the war-room view). Not blocking Epic 2's publish: the spine, extraction, rollup, and honesty semantics are all proven working.
+
+### Q25 — Valuations are not wired into the running API *(logged, not blocking)*
+`fair_price.above_market` reports `unevaluable / no_valuation` because no `ValuationSnapshot` is produced for a `VehicleInstance` in the running service — the adapters exist and are mock-only, but nothing calls them on instance creation. Same epic as Q24. ADR-007 (retail band) already fixes the comparison basis once a snapshot exists.

@@ -1,22 +1,40 @@
 /**
- * In-memory comms store (design T-009 §3.2). Seam: Postgres relational core
- * (specs/00 "Store") — rows here mirror the eventual tables, so the swap is
- * an implementation change, not a redesign.
+ * In-memory comms store (design T-014 §1.1). Seam: Postgres relational core
+ * (specs/00 "Store") — rows here mirror the eventual tables, so the swap
+ * (T-017) is an implementation change, not a redesign.
  *
- * The `@core` `Message` is stored VERBATIM inside its row (AC-6 — no
- * parallel message shape); `provider_message_ref` sits beside it as a
- * store-internal correlation column (D3), never a spine field.
+ * The `@core` `Message` is stored VERBATIM inside its row (AC-14 — no parallel
+ * message shape); `message_ref` sits beside it as a store-internal correlation
+ * column, never a spine field.
  *
- * Append-only posture: the write surface is append + fill-once only — no
- * update or delete of message content exists on the port (§3.2, D7).
+ * Append-only posture: the write surface is append + fill-once only — no update
+ * or delete of message content exists on the port.
  *
- * Identity routing is the AUTHORITATIVE mapping (§8 invariant 1): exact
- * match only, over values normalized identically at bind and at resolve.
- * Provider-agnostic by construction — no provider name appears anywhere in
- * this module (AC-3).
+ * Two routing tables, two different tenancy rules (specs/00 "Dealership data
+ * tenancy"; Q12 AMENDED):
+ *   1. identity → deal        — the AUTHORITATIVE inbound mapping, exact match
+ *                               only, over values normalized identically at
+ *                               bind and at resolve. Provider-agnostic by
+ *                               construction: no provider name appears here.
+ *   2. (deal, contact) → dealership_id — ACCOUNT-PRIVATE. Keyed by deal_id
+ *                               first, so a cross-account contact lookup is
+ *                               not expressible (AC-9).
+ *
+ * This module NEVER creates or edits a `Dealership`: that table is globally
+ * shared, and minting a row from an unrecognised phone number would inject
+ * account-guessed junk into the shared namespace the tenancy split exists to
+ * protect (D9). An unmatched sender goes to the unrouted holding area (D10).
  */
 
-import type { Deal, DealerContact, DealerThread, IdentityRef, Message, Offer } from '@core';
+import type {
+  Deal,
+  DealerThread,
+  DealershipContact,
+  IdentityRef,
+  Offer,
+  ProcessStep,
+  VehicleInstance,
+} from '@core';
 import type {
   CommsStore,
   QuarantinedRecord,
@@ -26,9 +44,9 @@ import type {
 import { mergeCurrentOffer, type RollupContribution, type RollupState } from '../rollup.js';
 
 /**
- * Normalization — identical at bind and at resolve (§3.2), conservative on
- * purpose: strip formatting only, never guess country codes or alias
- * variants. A near-miss identity is a NON-match (D5; test 9).
+ * Normalization — identical at bind and at resolve, conservative on purpose:
+ * strip formatting only, never guess country codes or alias variants. A
+ * near-miss identity is a NON-match (AC-13).
  */
 const normalizePhone = (phone: string): string => {
   const trimmed = phone.trim();
@@ -38,17 +56,14 @@ const normalizePhone = (phone: string): string => {
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
-/** D6: deterministic dealer_id from the normalized sender contact. */
-const dealerIdFor = (from: { phone?: string; email?: string }): string | undefined => {
-  if (from.phone !== undefined && from.phone !== '') return 'dealer:sms:' + normalizePhone(from.phone);
-  if (from.email !== undefined && from.email !== '') return 'dealer:email:' + normalizeEmail(from.email);
-  return undefined;
-};
+/** The process step a relationship whose first message just arrived is at (Q12). */
+const FIRST_CONTACT_PROCESS_STEP: ProcessStep = 'information_gather';
 
 interface ThreadRecord {
-  dealer_id: string;
-  dealer_name: string;
-  contact: DealerContact;
+  dealership_id: string;
+  vehicle_instance?: VehicleInstance;
+  working_with?: DealershipContact;
+  process_step: ProcessStep;
   rows: StoredMessage[];
   current_offer?: Offer;
   rollup: RollupState;
@@ -57,8 +72,13 @@ interface ThreadRecord {
 interface DealRecord {
   deal: Deal;
   threads: Map<string, ThreadRecord>;
-  /** D3 correlation index: provider_message_ref → row location. */
-  refIndex: Map<string, { dealer_id: string; row_index: number }>;
+  /** Correlation index: message_ref → row location. */
+  refIndex: Map<string, { dealership_id: string; row_index: number }>;
+  /**
+   * ACCOUNT-PRIVATE contact index, scoped to THIS deal:
+   * 'phone:<normalized>' | 'email:<normalized>' → dealership_id.
+   */
+  contactIndex: Map<string, string>;
 }
 
 export class InMemoryCommsStore implements CommsStore {
@@ -74,22 +94,50 @@ export class InMemoryCommsStore implements CommsStore {
 
   putDeal(deal: Deal): void {
     const clone = structuredClone(deal);
-    const threads = new Map<string, ThreadRecord>();
-    // Seeded threads (if any) become records; their messages carry no
-    // provider correlation refs, so they are not correlation-indexed.
+    const rec: DealRecord = {
+      deal: clone,
+      threads: new Map<string, ThreadRecord>(),
+      refIndex: new Map(),
+      contactIndex: new Map(),
+    };
+    this.deals.set(clone.id, rec);
+    // Seeded threads (if any) become records via the same path a caller would
+    // use, so contact binding and message indexing cannot drift apart.
     for (const t of clone.dealer_threads) {
-      threads.set(t.dealer_id, {
-        dealer_id: t.dealer_id,
-        dealer_name: t.dealer_name,
-        contact: t.contact,
-        rows: t.messages.map((m) => ({ message: m, provider_message_ref: '', source: '' })),
-        ...(t.current_offer !== undefined ? { current_offer: t.current_offer } : {}),
-        rollup: {},
-      });
+      this.putThread(clone.id, t);
     }
-    this.deals.set(clone.id, { deal: clone, threads, refIndex: new Map() });
     if (clone.identity_ref !== undefined) {
       this.bindIdentity(clone.id, clone.identity_ref);
+    }
+  }
+
+  putThread(deal_id: string, thread: DealerThread): void {
+    const rec = this.mustDeal(deal_id);
+    const clone = structuredClone(thread);
+    const record: ThreadRecord = {
+      dealership_id: clone.dealership_id,
+      process_step: clone.process_step,
+      // Seeded messages carry no correlation ref (they arrived with the
+      // aggregate, not through a webhook or a note submission). Origin is read
+      // off the message's own channel — a structural fact, never inferred from
+      // content — and no adapter id is fabricated for either kind (D8).
+      rows: clone.messages.map((m) => ({
+        message: m,
+        message_ref: '',
+        origin: m.channel === 'note' ? { kind: 'in_app' as const } : { kind: 'provider' as const, source: '' },
+      })),
+      rollup: {},
+      ...(clone.vehicle_instance !== undefined ? { vehicle_instance: clone.vehicle_instance } : {}),
+      ...(clone.working_with !== undefined ? { working_with: clone.working_with } : {}),
+      ...(clone.current_offer !== undefined ? { current_offer: clone.current_offer } : {}),
+    };
+    rec.threads.set(record.dealership_id, record);
+    // The account-private contact index is how inbound reaches this thread.
+    if (clone.working_with !== undefined) {
+      this.bindThreadContact(deal_id, record.dealership_id, {
+        ...(clone.working_with.phone !== undefined ? { phone: clone.working_with.phone } : {}),
+        ...(clone.working_with.email !== undefined ? { email: clone.working_with.email } : {}),
+      });
     }
   }
 
@@ -111,79 +159,86 @@ export class InMemoryCommsStore implements CommsStore {
       const hit = this.identityIndex.get('email:' + normalizeEmail(to.email_alias));
       if (hit !== undefined) return hit;
     }
-    return undefined; // exact match only — never fuzzy (D5)
+    return undefined; // exact match only — never fuzzy (AC-13)
+  }
+
+  // -- account-private dealership contact routing (D9) --------------------
+
+  bindThreadContact(
+    deal_id: string,
+    dealership_id: string,
+    contact: { phone?: string; email?: string },
+  ): void {
+    const rec = this.mustDeal(deal_id);
+    if (contact.phone !== undefined && contact.phone !== '') {
+      rec.contactIndex.set('phone:' + normalizePhone(contact.phone), dealership_id);
+    }
+    if (contact.email !== undefined && contact.email !== '') {
+      rec.contactIndex.set('email:' + normalizeEmail(contact.email), dealership_id);
+    }
+  }
+
+  resolveDealershipByContact(
+    deal_id: string,
+    from: { phone?: string; email?: string },
+  ): string | undefined {
+    const rec = this.deals.get(deal_id);
+    if (rec === undefined) return undefined;
+    if (from.phone !== undefined && from.phone !== '') {
+      const hit = rec.contactIndex.get('phone:' + normalizePhone(from.phone));
+      if (hit !== undefined) return hit;
+    }
+    if (from.email !== undefined && from.email !== '') {
+      const hit = rec.contactIndex.get('email:' + normalizeEmail(from.email));
+      if (hit !== undefined) return hit;
+    }
+    return undefined; // → unrouted (D10). Never a guess, never a new Dealership.
   }
 
   // -- threading ----------------------------------------------------------
 
-  resolveOrCreateThread(deal_id: string, from: { phone?: string; email?: string }): { dealer_id: string } {
+  resolveOrCreateThread(deal_id: string, dealership_id: string): { dealership_id: string } {
     const rec = this.mustDeal(deal_id);
-    const phone = from.phone !== undefined && from.phone !== '' ? normalizePhone(from.phone) : undefined;
-    const email = from.email !== undefined && from.email !== '' ? normalizeEmail(from.email) : undefined;
-    // Match against existing thread contacts first (D6).
-    for (const t of rec.threads.values()) {
-      if (phone !== undefined && t.contact.phone !== undefined && normalizePhone(t.contact.phone) === phone) {
-        return { dealer_id: t.dealer_id };
-      }
-      if (email !== undefined && t.contact.email !== undefined && normalizeEmail(t.contact.email) === email) {
-        return { dealer_id: t.dealer_id };
-      }
-    }
-    const dealer_id = dealerIdFor(from);
-    if (dealer_id === undefined) {
-      throw new Error('resolveOrCreateThread: inbound has neither phone nor email sender');
-    }
-    const existing = rec.threads.get(dealer_id);
-    if (existing !== undefined) return { dealer_id }; // deterministic id — idempotent under redelivery
-    const contact: DealerContact = {
-      ...(phone !== undefined ? { phone } : {}),
-      ...(email !== undefined ? { email } : {}),
-    };
-    rec.threads.set(dealer_id, {
-      dealer_id,
-      dealer_name: phone ?? email ?? dealer_id, // normalized contact string; enrichment later (D6)
-      contact,
+    const existing = rec.threads.get(dealership_id);
+    // Deterministic key ⇒ idempotent under redelivery, and a second message
+    // NEVER resets process_step, working_with, or vehicle_instance.
+    if (existing !== undefined) return { dealership_id };
+    rec.threads.set(dealership_id, {
+      dealership_id,
+      process_step: FIRST_CONTACT_PROCESS_STEP,
       rows: [],
       rollup: {},
     });
-    return { dealer_id };
+    return { dealership_id };
   }
 
-  appendMessage(deal_id: string, dealer_id: string, row: StoredMessage): 'appended' | 'duplicate' {
+  appendMessage(deal_id: string, dealership_id: string, row: StoredMessage): 'appended' | 'duplicate' {
     const rec = this.mustDeal(deal_id);
-    if (rec.refIndex.has(row.provider_message_ref)) return 'duplicate';
-    const thread = rec.threads.get(dealer_id);
+    if (rec.refIndex.has(row.message_ref)) return 'duplicate';
+    const thread = rec.threads.get(dealership_id);
     if (thread === undefined) {
-      throw new Error('appendMessage: unknown dealer_id (resolveOrCreateThread must run first)');
+      throw new Error('appendMessage: unknown dealership_id (resolveOrCreateThread must run first)');
     }
     thread.rows.push(structuredClone(row));
-    rec.refIndex.set(row.provider_message_ref, { dealer_id, row_index: thread.rows.length - 1 });
+    rec.refIndex.set(row.message_ref, { dealership_id, row_index: thread.rows.length - 1 });
     return 'appended';
   }
 
-  // -- fill-once enrichment (D7: never overwrites, never deletes) ----------
+  // -- fill-once enrichment (never overwrites, never deletes) -------------
 
-  setTranscript(deal_id: string, provider_message_ref: string, transcript: string): 'set' | 'already_set' | 'not_found' {
-    const row = this.findRow(deal_id, provider_message_ref);
-    if (row === undefined) return 'not_found';
-    if (row.message.transcript !== undefined) return 'already_set';
-    row.message.transcript = transcript;
-    return 'set';
-  }
-
-  attachExtractedOffer(deal_id: string, provider_message_ref: string, offer: Offer): 'set' | 'already_set' | 'not_found' {
-    const row = this.findRow(deal_id, provider_message_ref);
+  attachExtractedOffer(deal_id: string, message_ref: string, offer: Offer): 'set' | 'already_set' | 'not_found' {
+    const row = this.findRow(deal_id, message_ref);
     if (row === undefined) return 'not_found';
     if (row.message.extracted_offer !== undefined) return 'already_set';
     row.message.extracted_offer = structuredClone(offer); // extractor output, verbatim (possibly partial — ADR-005)
     return 'set';
   }
 
-  rollupCurrentOffer(deal_id: string, dealer_id: string, contribution: RollupContribution): void {
+  rollupCurrentOffer(deal_id: string, dealership_id: string, contribution: RollupContribution): void {
     const rec = this.mustDeal(deal_id);
-    const thread = rec.threads.get(dealer_id);
+    const thread = rec.threads.get(dealership_id);
     if (thread === undefined) {
-      throw new Error('rollupCurrentOffer: unknown dealer_id');
+      throw new Error('rollupCurrentOffer: unknown dealership_id');
     }
     const merged = mergeCurrentOffer(
       { ...(thread.current_offer !== undefined ? { offer: thread.current_offer } : {}), state: thread.rollup },
@@ -193,7 +248,7 @@ export class InMemoryCommsStore implements CommsStore {
     thread.rollup = merged.state;
   }
 
-  // -- no-drop holding areas (keyed no-ops — §5.4 braces) ------------------
+  // -- no-drop holding areas (keyed no-ops — the braces) ------------------
 
   recordQuarantined(rec: QuarantinedRecord): void {
     const dupe = this.quarantined.some(
@@ -203,15 +258,37 @@ export class InMemoryCommsStore implements CommsStore {
     this.quarantined.push(structuredClone(rec));
   }
 
+  /**
+   * Keyed on `(source, provider_message_ref)` — the write that makes a plain
+   * provider redelivery a no-op (design §3.2 rows 4-5), and, since the router
+   * no longer marks the ledger on these branches, the ONLY dedupe they have.
+   *
+   * On a keyed hit the held item is UPDATED IN PLACE rather than dropped: the
+   * inbound payload is identical by construction (same source, same provider
+   * ref), but `reason` and `deal_id` are the operator-facing fields and they
+   * can legitimately improve on replay — an item first held as
+   * `no_identity_match` and replayed after the buyer binds the identity, but
+   * before the dealership contact is known, resolves the deal and comes back
+   * as `{no_thread_match, deal_id}`. Returning early there would leave the
+   * operator reading a stale `no_identity_match` with no `deal_id` on it,
+   * trading one silent gap for another. The record stays exactly one row and
+   * `recorded_at` keeps the FIRST hold time — when it was held, not when it
+   * was last re-examined.
+   */
   recordUnrouted(rec: UnroutedRecord): void {
-    const dupe = this.unrouted.some(
+    const existing = this.unrouted.find(
       (u) => u.source === rec.source && u.inbound.provider_message_ref === rec.inbound.provider_message_ref,
     );
-    if (dupe) return;
+    if (existing !== undefined) {
+      existing.reason = rec.reason;
+      if (rec.deal_id !== undefined) existing.deal_id = rec.deal_id;
+      else delete existing.deal_id;
+      return;
+    }
     this.unrouted.push(structuredClone(rec));
   }
 
-  // -- consumer idempotency ledger ----------------------------------------
+  // -- consumer idempotency ledger ---------------------------------------
 
   hasProcessed(consumer: string, idempotency_key: string): boolean {
     return this.processed.has(consumer + '\u0000' + idempotency_key);
@@ -224,7 +301,7 @@ export class InMemoryCommsStore implements CommsStore {
     return 'first';
   }
 
-  // -- read side (assembly; the read model deep-clones) --------------------
+  // -- read side (assembly; the read model deep-clones) -------------------
 
   getDeal(deal_id: string): Deal | undefined {
     const rec = this.deals.get(deal_id);
@@ -235,48 +312,50 @@ export class InMemoryCommsStore implements CommsStore {
     };
   }
 
-  getThread(deal_id: string, dealer_id: string): DealerThread | undefined {
-    const thread = this.deals.get(deal_id)?.threads.get(dealer_id);
+  getThread(deal_id: string, dealership_id: string): DealerThread | undefined {
+    const thread = this.deals.get(deal_id)?.threads.get(dealership_id);
     if (thread === undefined) return undefined;
     return this.assembleThread(thread);
   }
 
-  getMessageByRef(deal_id: string, provider_message_ref: string): StoredMessage | undefined {
-    return this.findRow(deal_id, provider_message_ref);
+  getMessageByRef(deal_id: string, message_ref: string): StoredMessage | undefined {
+    return this.findRow(deal_id, message_ref);
   }
 
   listQuarantined(): readonly QuarantinedRecord[] {
     return this.quarantined;
   }
 
-  listUnrouted(): readonly UnroutedRecord[] {
-    return this.unrouted;
+  listUnrouted(deal_id?: string): readonly UnroutedRecord[] {
+    if (deal_id === undefined) return this.unrouted;
+    return this.unrouted.filter((u) => u.deal_id === deal_id);
   }
 
-  // -- internals -----------------------------------------------------------
+  // -- internals ----------------------------------------------------------
 
   private assembleThread(t: ThreadRecord): DealerThread {
     return {
-      dealer_id: t.dealer_id,
-      dealer_name: t.dealer_name,
-      contact: t.contact,
+      dealership_id: t.dealership_id,
+      process_step: t.process_step,
       messages: t.rows.map((r) => r.message),
+      ...(t.vehicle_instance !== undefined ? { vehicle_instance: t.vehicle_instance } : {}),
+      ...(t.working_with !== undefined ? { working_with: t.working_with } : {}),
       ...(t.current_offer !== undefined ? { current_offer: t.current_offer } : {}),
     };
   }
 
-  private findRow(deal_id: string, provider_message_ref: string): StoredMessage | undefined {
+  private findRow(deal_id: string, message_ref: string): StoredMessage | undefined {
     const rec = this.deals.get(deal_id);
     if (rec === undefined) return undefined;
-    const loc = rec.refIndex.get(provider_message_ref);
+    const loc = rec.refIndex.get(message_ref);
     if (loc === undefined) return undefined;
-    return rec.threads.get(loc.dealer_id)?.rows[loc.row_index];
+    return rec.threads.get(loc.dealership_id)?.rows[loc.row_index];
   }
 
   private mustDeal(deal_id: string): DealRecord {
     const rec = this.deals.get(deal_id);
     if (rec === undefined) {
-      throw new Error('unknown deal_id'); // consumer classifies as retry (§5.3 store class)
+      throw new Error('unknown deal_id'); // consumer classifies as retry (store class)
     }
     return rec;
   }

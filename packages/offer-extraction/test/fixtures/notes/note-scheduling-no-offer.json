@@ -1,0 +1,8 @@
+{
+  "name": "note-scheduling-no-offer",
+  "channel": "note",
+  "text": "Sam called to confirm my test drive tomorrow afternoon. Ask for him at the front desk when I arrive.",
+  "expected": {
+    "found": false
+  }
+}

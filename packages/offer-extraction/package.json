@@ -1,4 +1,5 @@
 {
   "name": "@deal-copilot/offer-extraction",
-  "private": true
+  "private": true,
+  "type": "module"
 }
