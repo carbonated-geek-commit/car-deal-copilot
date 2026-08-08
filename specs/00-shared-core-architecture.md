@@ -177,7 +177,7 @@ Every external feed sits behind one internal interface. Core services never see 
 |------|---------|-----------|------|
 | Retail / trade-in | KBB, J.D. Power (NADA) | Black Book | Licensed feeds. |
 | Wholesale / auction | Manheim (MMR) | — | Dealer-side truth; powers the spread view. |
-| Private-party | Marketplace listings | Own listings ingest | True private-market value. |
+| Private-party | **KBB private-party value** + **buyer-entered comps** | Licensed aggregator (future) | No marketplace scraping — Meta publishes no API and scraping breaches their terms (Q15). The app points the buyer at good marketplaces and they enter what they find. |
 
 Blend into **wholesale vs trade-in vs retail**. Snapshot + cache.
 
