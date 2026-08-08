@@ -1,27 +1,25 @@
 /**
- * `current_offer` rollup policy — design T-009 §6 (D4).
+ * `current_offer` rollup policy — ADR-006 (design T-014 §1.6).
  *
- * PRIMARY POLICY (implemented here): per-field newest-message-wins
+ * POLICY (ratified by ADR-006, "per-field newest-message-wins"): per-field
  * accumulation with provenance. "Newest" is the contributing
- * `Message.timestamp` (tie-break: `provider_message_ref` lexicographic),
- * NOT processing order — so the merge is commutative, associative, and
- * idempotent under at-least-once unordered delivery: any interleaving or
- * redelivery of the same contribution set yields the same `current_offer`.
+ * `Message.timestamp` (tie-break: `message_ref` lexicographic), NOT processing
+ * order — so the merge is commutative, associative, and idempotent under
+ * at-least-once unordered delivery: any interleaving or redelivery of the same
+ * contribution set yields the same `current_offer`.
  *
- * ADR gate (design §6, task note): reading spec text "rolled into the
- * thread's `current_offer`" as accumulate-not-replace is an interpretive
- * call beyond the literal spec — the lead must resolve-and-log an ADR
- * before T-009's build merges. The documented fallback (wholesale
- * newest-offer-wins under the same `(at, ref)` ordering) is contained to
- * this file; no other module changes under either resolution.
+ * The merge rule is ratified; changing it requires a superseding ADR, not a
+ * refactor. The v0.5 migration renamed the correlation field
+ * (`provider_message_ref` → `message_ref`, which now also carries a note's
+ * `note:<client_note_ref>`) and changed nothing else here.
  *
- * ADR-005: absence is a first-class state. Fields absent on a contribution
- * are never touched and never defaulted — missing values are NEVER zero.
+ * ADR-005: absence is a first-class state. Fields absent on a contribution are
+ * never touched and never defaulted — missing values are NEVER zero.
  */
 
 import type { IsoTimestamp, Offer } from '@core';
 
-/** Contributing Message.timestamp + provider_message_ref. */
+/** Contributing Message.timestamp + message_ref. */
 export interface RollupProvenance {
   at: IsoTimestamp;
   ref: string;
@@ -38,16 +36,16 @@ export interface RollupState {
 
 export interface RollupContribution {
   offer: Offer;
-  /** The contributing Message.timestamp (= InboundComms.received_at). */
+  /** The contributing Message.timestamp (ordering source, NOT processing order). */
   at: IsoTimestamp;
-  /** The contributing message's provider_message_ref (tie-break). */
+  /** The contributing message's `message_ref` (tie-break). */
   ref: string;
 }
 
 /**
  * Strict "newer than" over (timestamp, ref). ISO-8601 UTC timestamps compare
  * lexicographically ⇔ chronologically. Equal (at, ref) is NOT newer — a
- * redelivered contribution is an exact no-op (idempotency, §6.4).
+ * redelivered contribution is an exact no-op (idempotency).
  */
 const isNewer = (next: RollupProvenance, prev: RollupProvenance | undefined): boolean => {
   if (prev === undefined) return true;
@@ -56,7 +54,7 @@ const isNewer = (next: RollupProvenance, prev: RollupProvenance | undefined): bo
 };
 
 /**
- * Pure, deterministic, commutative, idempotent (design §6).
+ * Pure, deterministic, commutative, idempotent (ADR-006).
  *
  * Rules:
  * 1. Per-field newest-wins for sale_price / apr / term_months / monthly —
@@ -66,7 +64,7 @@ const isNewer = (next: RollupProvenance, prev: RollupProvenance | undefined): bo
  * 2. fees[] contends as a unit: a non-empty fees replaces wholesale under
  *    the same ordering; an empty fees: [] never erases known fees
  *    (extractor emits [] for "no fee lines found", not "fees are zero").
- * 3. flags is always [] here — flag evaluation is the flag engine's (T-002),
+ * 3. flags is always [] here — flag evaluation is the flag engine's (T-011),
  *    downstream; this service never populates or interprets flag vocabulary
  *    (ADR-002 untouched).
  * 4. Message.extracted_offer is never derived from this rollup — only
