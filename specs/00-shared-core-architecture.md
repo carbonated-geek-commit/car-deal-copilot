@@ -1,4 +1,4 @@
-# Shared Core — Architecture Spine (v0.3)
+# Shared Core — Architecture Spine (v0.4)
 
 *The common spine underneath both products. The [Consumer Spec](./01-consumer-product-spec.md) and the [B2B Spec](./02-b2b-product-spec.md) reference this doc and diverge from it — they never redefine what's here. If a model or service is in this file, it is the single source of truth for both.*
 

@@ -1,4 +1,4 @@
-# Consumer Product Spec (v0.3)
+# Consumer Product Spec (v0.4)
 
 *Builds on [Shared Core](./00-shared-core-architecture.md). Distinct from the [B2B product](./02-b2b-product-spec.md) — different buyer, pricing, and liability posture. This spec covers only what's specific to the consumer business.*
 
