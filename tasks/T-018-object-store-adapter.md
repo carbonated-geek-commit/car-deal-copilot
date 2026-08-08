@@ -1,8 +1,8 @@
 ---
 id: T-018
 title: S3-compatible object store adapter — attachments, documents, dossiers (no audio)
-stage: build
-owner_agent: designer
+stage: test
+owner_agent: builder
 status: in_progress
 depends_on: [T-012, T-015]
 file_ownership:
@@ -47,3 +47,4 @@ mock_only: false
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
 2026-08-07 · designer · design complete → docs/design/T-018.md; stage design → build. Notes to lead: D5 (RawPayloadStore is sync, S3 is not — resolved as write-behind within ownership; recommend a follow-up task make the T-014 port async) and D6 (@object-store → @comms import edge, authorized by ADR-009 §1, amends T-015 §2.2). Not blocked.
+2026-08-07 · builder · build complete → packages/object-store/src/{contract,keys,content-policy,backend,memory-backend,s3-backend,artifact-store,config,raw-payloads,index}.ts + node-shim.d.ts; scripts.typecheck added to the package manifest (ADR-009 §2, dependencies untouched); `npx tsc -p packages/object-store --noEmit` green; no tests written (tester stage owns test/**). Stage build → test. One deviation from design §7, resolved within ownership and reported to the lead: a `src/node-shim.d.ts` WAS required — T-015 §5.7's premise that @types/node reaches the program transitively is false here (verified: `node:crypto` is unresolved even with @aws-sdk/client-s3 imported), and the duplicate-identifier collision it guarded against cannot occur because an ambient .d.ts is included by a tsconfig glob, never by an import, so no program sees two shims. Design notes D5 (write-behind window) and D6 (@object-store → @comms edge) stand as written. Not blocked.
