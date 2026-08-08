@@ -1,9 +1,9 @@
 ---
 id: T-013
 title: Adapter layer rebound to VehicleInstance (valuation, NHTSA, vehicle-history, credit-prequal)
-stage: build
-owner_agent: designer
-status: designed
+stage: test
+owner_agent: builder
+status: built
 depends_on: [T-010]
 file_ownership:
   - "packages/adapters/**"
@@ -51,3 +51,4 @@ All four adapter packages — `valuation` (KBB-mock, Manheim-mock, blend), `nhts
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half A: v0.5 domain migration)
 2026-08-07 · designer · design complete — docs/design/T-013.md (13 interpretive calls D1–D13; valuation + nhtsa carry the code change, vehicle-history + credit-prequal are verification-only); stage design → build
+undefined · builder · build complete — valuation src rebound to VehicleInstance (instance-bound snapshots, year/trim/mileage/condition all load-bearing, VIN unvalidated fall-through, KBB private_party band, foreign-instance blend discard); nhtsa toVehicleData(instance, parts, captured_at) + VehicleDataParts; vehicle-history doc guarantees; credit-prequal untouched. All four src trees typecheck; vehicle-history + credit-prequal suites green (94). Existing valuation/nhtsa test files still reference the pre-v0.5 spine and are left for the tester stage. stage build → test
