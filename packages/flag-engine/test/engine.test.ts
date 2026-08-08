@@ -1,5 +1,10 @@
 /**
- * T-002 flag-engine test suite (docs/design/T-002.md §5, AC-7; ADR-005).
+ * Flag-engine test suite (docs/design/T-002.md §5, AC-7; ADR-005), migrated by
+ * T-011 off the four-flag vocabulary onto the v0.5 five-flag one
+ * (docs/design/T-011.md §5.2): `above_market` is a member of `OFFER_FLAGS`, so
+ * every result-shape assertion now accounts for it, and `BENIGN_CONTEXT`
+ * carries a `ValuationSnapshot` — without one a "clean" verdict would be
+ * dishonest, since `above_market` would be unevaluable (ADR-005, ADR-007).
  *
  * Suites: per-flag firing / not-firing (AC-2..5), boundary semantics (D4),
  * missing inputs → unevaluable (D3 as refined by ADR-005), vocabulary
@@ -27,10 +32,12 @@ import {
   BENIGN_CONTEXT,
   CONFIG_WITH_UNMATCHED_CAP,
   FIXTURE_CONFIG,
+  FIXTURE_INSTANCE_ID,
   deepFreeze,
   makeEverythingWrongOffer,
   makeOffer,
   makeOfferWithout,
+  makeValuation,
 } from './fixtures.js';
 
 /** Fired-flags shorthand — most suites assert on the emitted set only. */
@@ -92,7 +99,7 @@ describe('payment_packing (AC-2)', () => {
   });
 
   it('missing term_months leaves the other flags unaffected', () => {
-    // Everything wrong except the term is absent → the other three still fire.
+    // Everything wrong except the term is absent → the other four still fire.
     const offer = makeOfferWithout(['term_months'], {
       sale_price: 2_600_000,
       fees: [{ name: 'doc fee', amount: 60_000 }],
@@ -102,6 +109,7 @@ describe('payment_packing (AC-2)', () => {
       'rate_markup',
       'junk_fee',
       'over_walkaway',
+      'above_market',
     ]);
   });
 
@@ -110,11 +118,22 @@ describe('payment_packing (AC-2)', () => {
     const offer = makeOfferWithout(['sale_price', 'apr'], { term_months: 84 });
     const result = evaluateOffer(offer, BENIGN_CONTEXT, FIXTURE_CONFIG);
     expect(result.flags).toEqual(['payment_packing']);
-    expect(result.unevaluable).toEqual(['rate_markup', 'over_walkaway']);
+    // above_market shares the price input with over_walkaway (T-011 §4.1 row 4).
+    expect(result.unevaluable).toEqual(['rate_markup', 'over_walkaway', 'above_market']);
   });
 });
 
 describe('rate_markup (AC-3)', () => {
+  /**
+   * No prequal, but the instance IS valued — so `rate_markup` is the only
+   * flag whose input is missing and the assertions below stay about it alone.
+   */
+  const NO_PREQUAL_CONTEXT: FlagContext = {
+    walk_away_number: 2_600_000,
+    valuation: makeValuation(),
+    vehicle_instance_id: FIXTURE_INSTANCE_ID,
+  };
+
   it('fires when APR is above the qualified rate', () => {
     const offer = makeOffer({ apr: 9.9 });
     expect(flagsOf(offer, BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual(['rate_markup']);
@@ -149,20 +168,19 @@ describe('rate_markup (AC-3)', () => {
   });
 
   it('missing qualified_apr (ADR-005, no prequal): unevaluable even with a high APR', () => {
-    const noPrequal: FlagContext = { walk_away_number: 2_600_000 };
     const offer = makeOffer({ apr: 24.9 });
-    const result = evaluateOffer(offer, noPrequal, FIXTURE_CONFIG);
+    const result = evaluateOffer(offer, NO_PREQUAL_CONTEXT, FIXTURE_CONFIG);
     expect(result.flags).not.toContain('rate_markup');
     expect(result.unevaluable).toEqual(['rate_markup']);
   });
 
   it('missing qualified_apr leaves the other flags unaffected', () => {
-    const noPrequal: FlagContext = { walk_away_number: 2_600_000 };
     const offer = makeEverythingWrongOffer();
-    expect(flagsOf(offer, noPrequal, FIXTURE_CONFIG)).toEqual([
+    expect(flagsOf(offer, NO_PREQUAL_CONTEXT, FIXTURE_CONFIG)).toEqual([
       'payment_packing',
       'junk_fee',
       'over_walkaway',
+      'above_market',
     ]);
   });
 });
@@ -235,19 +253,31 @@ describe('junk_fee (AC-4)', () => {
 });
 
 describe('over_walkaway (AC-5, D2 total = sale_price + Σ fees)', () => {
+  /**
+   * T-011 AC-3: `over_walkaway` is the DEAL-LEVEL budget ceiling and is not
+   * re-pointed at valuation. This suite therefore prices every fixture against
+   * a roomy retail band, so a price that crosses the walk-away number does not
+   * also trip `above_market` and confound the assertion. The two flags' mutual
+   * independence is proved separately (T-011 §5.4).
+   */
+  const BUDGET_ONLY_CONTEXT: FlagContext = {
+    ...BENIGN_CONTEXT,
+    valuation: makeValuation({ retail: 5_000_000 }),
+  };
+
   it('fires when the out-the-door total crosses the walk-away number', () => {
     const offer = makeOffer({ sale_price: 2_600_000 }); // + 40_000 fee = 2_640_000
-    expect(flagsOf(offer, BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual(['over_walkaway']);
+    expect(flagsOf(offer, BUDGET_ONLY_CONTEXT, FIXTURE_CONFIG)).toEqual(['over_walkaway']);
   });
 
   it('boundary (D4): total = walk-away does not fire ("crosses" is strict)', () => {
     const offer = makeOffer({ sale_price: 2_560_000 }); // + 40_000 = 2_600_000 exactly
-    expect(flagsOf(offer, BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual([]);
+    expect(flagsOf(offer, BUDGET_ONLY_CONTEXT, FIXTURE_CONFIG)).toEqual([]);
   });
 
   it('boundary (D4): total = walk-away + 1 cent fires', () => {
     const offer = makeOffer({ sale_price: 2_560_001 }); // + 40_000 = 2_600_001
-    expect(flagsOf(offer, BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual(['over_walkaway']);
+    expect(flagsOf(offer, BUDGET_ONLY_CONTEXT, FIXTURE_CONFIG)).toEqual(['over_walkaway']);
   });
 
   it('fees are part of the total: sale price alone under walk-away, fees push it over (D2)', () => {
@@ -255,25 +285,26 @@ describe('over_walkaway (AC-5, D2 total = sale_price + Σ fees)', () => {
       sale_price: 2_590_000, // under 2_600_000 on its own
       fees: [{ name: 'doc fee', amount: 40_000 }], // total 2_630_000 — over
     });
-    expect(flagsOf(offer, BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual(['over_walkaway']);
+    expect(flagsOf(offer, BUDGET_ONLY_CONTEXT, FIXTURE_CONFIG)).toEqual(['over_walkaway']);
   });
 
   it('does not fire when the total is comfortably under', () => {
-    expect(flagsOf(makeOffer(), BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual([]);
+    expect(flagsOf(makeOffer(), BUDGET_ONLY_CONTEXT, FIXTURE_CONFIG)).toEqual([]);
   });
 
   it('missing sale_price (ADR-005): unevaluable — not emitted, surfaced distinctly', () => {
     const offer = makeOfferWithout(['sale_price']);
-    const result = evaluateOffer(offer, BENIGN_CONTEXT, FIXTURE_CONFIG);
+    const result = evaluateOffer(offer, BUDGET_ONLY_CONTEXT, FIXTURE_CONFIG);
     expect(result.flags).not.toContain('over_walkaway');
-    expect(result.unevaluable).toEqual(['over_walkaway']);
+    // Both price-dependent flags go unevaluable together (T-011 §4.1 row 4).
+    expect(result.unevaluable).toEqual(['over_walkaway', 'above_market']);
   });
 
   it('missing sale_price is NEVER defaulted to zero (ADR-005)', () => {
     // If a missing price were treated as 0, the 40_000-cent fee alone would
     // cross this zero walk-away number and fire. It must not: unevaluable.
     const offer = makeOfferWithout(['sale_price']);
-    const zeroWalkAway: FlagContext = { ...BENIGN_CONTEXT, walk_away_number: 0 };
+    const zeroWalkAway: FlagContext = { ...BUDGET_ONLY_CONTEXT, walk_away_number: 0 };
     const result = evaluateOffer(offer, zeroWalkAway, FIXTURE_CONFIG);
     expect(result.flags).not.toContain('over_walkaway');
     expect(result.unevaluable).toContain('over_walkaway');
@@ -285,14 +316,14 @@ describe('over_walkaway (AC-5, D2 total = sale_price + Σ fees)', () => {
       apr: 9.9,
       term_months: 84,
     });
-    const result = evaluateOffer(offer, BENIGN_CONTEXT, FIXTURE_CONFIG);
+    const result = evaluateOffer(offer, BUDGET_ONLY_CONTEXT, FIXTURE_CONFIG);
     expect(result.flags).toEqual(['payment_packing', 'rate_markup', 'junk_fee']);
-    expect(result.unevaluable).toEqual(['over_walkaway']);
+    expect(result.unevaluable).toEqual(['over_walkaway', 'above_market']);
   });
 });
 
 describe('unevaluable set semantics (ADR-005)', () => {
-  it('a fully-populated offer with prequal has an empty unevaluable set', () => {
+  it('a fully-populated offer with prequal and a valuation has an empty unevaluable set', () => {
     expect(evaluateOffer(makeOffer(), BENIGN_CONTEXT, FIXTURE_CONFIG).unevaluable).toEqual([]);
   });
 
@@ -301,22 +332,27 @@ describe('unevaluable set semantics (ADR-005)', () => {
     const assessed = evaluateOffer(makeOffer(), BENIGN_CONTEXT, FIXTURE_CONFIG);
     expect(assessed.flags).toEqual([]);
     expect(assessed.unevaluable).toEqual([]);
-    // Price-less otherwise-benign offer: over_walkaway also absent from flags,
-    // but now it is reported unevaluable — a different, visible state.
+    // Price-less otherwise-benign offer: the two price-dependent flags are also
+    // absent from flags, but now reported unevaluable — a different, visible state.
     const priceless = evaluateOffer(
       makeOfferWithout(['sale_price']),
       BENIGN_CONTEXT,
       FIXTURE_CONFIG,
     );
     expect(priceless.flags).toEqual([]);
-    expect(priceless.unevaluable).toEqual(['over_walkaway']);
+    expect(priceless.unevaluable).toEqual(['over_walkaway', 'above_market']);
   });
 
   it('a bare partial offer (fees/flags only) makes exactly the input-requiring flags unevaluable', () => {
     const offer = makeOfferWithout(['sale_price', 'apr', 'term_months', 'monthly']);
     const result = evaluateOffer(offer, BENIGN_CONTEXT, FIXTURE_CONFIG);
     expect(result.flags).toEqual([]); // junk_fee assessed: 40_000 fee under cap
-    expect(result.unevaluable).toEqual(['payment_packing', 'rate_markup', 'over_walkaway']);
+    expect(result.unevaluable).toEqual([
+      'payment_packing',
+      'rate_markup',
+      'over_walkaway',
+      'above_market',
+    ]);
   });
 
   it('flags and unevaluable are disjoint, each duplicate-free and in OFFER_FLAGS order', () => {
@@ -398,7 +434,7 @@ describe('purity, determinism, ordering (AC-1, D5, D7)', () => {
 
   it('ignores offer.flags on input — prepopulated garbage-but-valid flags do not leak through (D5)', () => {
     const cleanEconomicsDirtyFlags = makeOffer({
-      flags: ['over_walkaway', 'junk_fee', 'payment_packing', 'rate_markup'],
+      flags: ['over_walkaway', 'junk_fee', 'payment_packing', 'rate_markup', 'above_market'],
     });
     expect(flagsOf(cleanEconomicsDirtyFlags, BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual([]);
   });
@@ -433,13 +469,15 @@ describe('purity, determinism, ordering (AC-1, D5, D7)', () => {
 });
 
 describe('combined fixtures (design §5)', () => {
-  it('the "everything wrong" offer emits all four flags and nothing unevaluable', () => {
+  it('the "everything wrong" offer emits all five flags and nothing unevaluable', () => {
     expect(evaluateOffer(makeEverythingWrongOffer(), BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual({
-      flags: ['payment_packing', 'rate_markup', 'junk_fee', 'over_walkaway'],
+      flags: ['payment_packing', 'rate_markup', 'junk_fee', 'over_walkaway', 'above_market'],
       unevaluable: [],
     });
   });
 
+  // Only passes because BENIGN_CONTEXT carries a valuation: without one,
+  // above_market would be unevaluable, never a clean bill (ADR-005, T-011 AC-5).
   it('a clean offer emits no flags and nothing unevaluable', () => {
     expect(evaluateOffer(makeOffer(), BENIGN_CONTEXT, FIXTURE_CONFIG)).toEqual({
       flags: [],
@@ -495,6 +533,7 @@ describe('error paths — total function, never throws (design §4.1)', () => {
       stretched_term_min_months: -1,
       rate_markup_tolerance_points: -10,
       fee_fair_caps: [],
+      above_market_tolerance_bps: -100,
     };
     let result: FlagEvaluation | undefined;
     expect(() => {
@@ -512,7 +551,7 @@ describe('error paths — total function, never throws (design §4.1)', () => {
     const bareContext: FlagContext = { walk_away_number: 0 };
     expect(evaluateOffer(bareOffer, bareContext, FIXTURE_CONFIG)).toEqual({
       flags: [],
-      unevaluable: ['payment_packing', 'rate_markup', 'over_walkaway'],
+      unevaluable: ['payment_packing', 'rate_markup', 'over_walkaway', 'above_market'],
     });
   });
 });
