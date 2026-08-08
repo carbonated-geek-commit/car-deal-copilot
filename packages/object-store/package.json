@@ -6,5 +6,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3"
-  }
+  },
+  "type": "module"
 }

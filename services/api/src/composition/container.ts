@@ -114,7 +114,33 @@ export async function createContainer(deps: ContainerDeps): Promise<ApiResult<Ap
   }
 
   // ---- relational plane --------------------------------------------------
-  const queue: EventQueue = new InMemoryQueue();
+  const in_memory_queue = new InMemoryQueue();
+  const queue: EventQueue = in_memory_queue;
+
+  // CHIEF FIX (2026-08-08): `InMemoryQueue` delivers only when `drain()` is
+  // called, which is exactly right for tests — they drain explicitly and assert
+  // on a quiescent bus. But nothing drove it in the running process, so every
+  // published event sat in the queue undelivered: a buyer's note was stored and
+  // then NOTHING extracted an offer from it, so the war room reported
+  // "unevaluable / no_offer" forever. The consumers were registered; there was
+  // simply no worker turning the crank.
+  //
+  // This is the in-memory deployment's worker loop. `unref()` keeps it from
+  // holding the process open, and `close()` clears it so shutdown is clean.
+  // When a managed queue replaces this (its own delivery machinery), the loop
+  // goes away with it.
+  const QUEUE_TICK_MS = 50;
+  const queue_pump = setInterval(() => {
+    void in_memory_queue.drain().catch((cause: unknown) => {
+      log({
+        level: 'error',
+        event: 'queue_drain_failed',
+        message: 'in-memory queue drain threw; events may be undelivered',
+        detail: { cause: cause instanceof Error ? cause.message : 'unknown' },
+      });
+    });
+  }, QUEUE_TICK_MS);
+  queue_pump.unref();
 
   let store: CommsStore;
   let receiptsFor: (scope: AccountScopeShape) => ReceiptStore;
@@ -208,6 +234,10 @@ export async function createContainer(deps: ContainerDeps): Promise<ApiResult<Ap
   const close = async (): Promise<void> => {
     if (closed) return;
     closed = true;
+    // Stop the worker loop first, then drain once more so anything published
+    // during the final requests is delivered rather than dropped on the floor.
+    clearInterval(queue_pump);
+    await in_memory_queue.drain().catch(() => undefined);
     // §4.6 order. (1) is `app.close()` and belongs to the caller; from here:
     // (2) drain the write-behind window — skipping it discards payloads the
     // process already told a provider it had accepted; (3) close the DB handle,

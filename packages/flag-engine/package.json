@@ -1,4 +1,5 @@
 {
   "name": "@deal-copilot/flag-engine",
-  "private": true
+  "private": true,
+  "type": "module"
 }

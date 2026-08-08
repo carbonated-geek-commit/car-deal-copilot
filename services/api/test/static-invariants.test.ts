@@ -63,9 +63,18 @@ describe('the source itself', () => {
   // precisely because the plan succeeded. The durable property it was really
   // protecting is the layering — foundation code must not depend on routes —
   // so that is what is asserted instead.
-  it('foundation sources never import from routes/ — dependency points one way', () => {
-    const foundation = SOURCES.filter((s) => !s.name.startsWith('routes/'));
-    const leaking = foundation.filter((s) => /from\s+['"][^'"]*\broutes\//u.test(codeOnly(s.text)));
+  it('only the composition root imports routes/ — dependency points one way', () => {
+    // The process entry point MUST import the route suite; that is what wiring
+    // is. Everything else — http/, auth/, context/, errors/, projection/,
+    // config/, composition/ — stays ignorant of routes so the foundation can be
+    // built and tested without them.
+    const COMPOSITION_ROOTS = new Set(['start.ts', 'bin.ts', 'index.ts']);
+    const leaking = SOURCES.filter(
+      (s) =>
+        !s.name.startsWith('routes/') &&
+        !COMPOSITION_ROOTS.has(s.name) &&
+        /from\s+['"][^'"]*\broutes\//u.test(codeOnly(s.text)),
+    );
     expect(leaking.map((s) => s.name)).toEqual([]);
   });
 

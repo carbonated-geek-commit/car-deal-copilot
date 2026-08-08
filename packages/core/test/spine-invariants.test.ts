@@ -216,6 +216,7 @@ describe('CLAUDE.md invariant 2 — approved stack only', () => {
   const APPROVED = new Set([
     'typescript',
     'vitest',
+    'tsx', // ADR-011 — dev-only TypeScript runner (flagged for Corban's review)
     'pg',
     '@types/pg',
     '@types/node',

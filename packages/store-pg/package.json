@@ -6,5 +6,6 @@
   },
   "devDependencies": {
     "@types/pg": "^8"
-  }
+  },
+  "type": "module"
 }

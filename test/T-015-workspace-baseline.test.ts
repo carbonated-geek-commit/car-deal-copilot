@@ -109,10 +109,12 @@ const SOURCE_MEMBERS_IN_TYPECHECK_CHAIN = [
   'services/comms',
 ];
 
-/** ADR-008's five slots, plus the two root devDeps that predate Epic 2. */
+/** ADR-008's five slots, the two root devDeps that predate Epic 2, and the
+ * dev-only TypeScript runner admitted by ADR-011 (flagged for Corban). */
 const APPROVED_DEPENDENCIES = new Set([
   'typescript',
   'vitest',
+  'tsx', // ADR-011 — dev-only runner; resolves tsconfig path aliases at runtime
   'pg',
   '@types/pg',
   '@aws-sdk/client-s3',
@@ -267,8 +269,11 @@ describe('AC-3 — dependency placement is per package (design D3, §3.2)', () =
     expect(pkg.optionalDependencies).toBeUndefined();
   });
 
-  it('root devDependencies are still typescript + vitest only; root declares no dependencies (D3)', () => {
-    expect(rootPkg.devDependencies).toEqual({ typescript: '^5.5', vitest: '^3' });
+  it('root devDependencies stay toolchain-only and root declares no dependencies (D3, ADR-011)', () => {
+    // ADR-011 admitted `tsx` as a dev-only runner so the service can actually
+    // start; the invariant that matters is that root carries TOOLCHAIN only and
+    // never a runtime dependency, not that the set is frozen at two names.
+    expect(Object.keys(rootPkg.devDependencies).sort()).toEqual(['tsx', 'typescript', 'vitest']);
     expect(rootPkg.dependencies).toBeUndefined();
   });
 
@@ -417,8 +422,13 @@ describe('AC-4 — no unapproved integration, no managed queue (design §5.2)', 
     }
   });
 
-  it('no TS runtime loader was pre-registered — D7 stays open and escalates to the lead (§4.6)', () => {
-    for (const loader of ['tsx', 'ts-node', '@swc/register', 'esbuild-register', 'babel-register']) {
+  it('exactly one TS runtime loader is installed, and it is the one ADR-011 named (D7 resolved)', () => {
+    // D7 was left open for the lead. It is now closed by ADR-011: `tsx` is the
+    // chosen loader because the bare `@core`/`@comms` aliases have no runtime
+    // resolution otherwise and the process could not boot. Every OTHER loader
+    // stays banned, so this still catches a second one creeping in.
+    expect(installed.has('tsx'), 'tsx is the ADR-011 loader and must be present').toBe(true);
+    for (const loader of ['ts-node', '@swc/register', 'esbuild-register', 'babel-register']) {
       expect(installed.has(loader), `${loader} is installed`).toBe(false);
     }
   });

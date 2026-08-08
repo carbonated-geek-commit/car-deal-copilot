@@ -30,6 +30,7 @@ import { createPermissiveDealGate } from './auth/deal-gate.js';
 import { createPocHeaderResolver } from './context/account-context.js';
 import type { ApiError } from './errors/envelope.js';
 import { buildServer } from './http/server.js';
+import { createRouteSuite } from './routes/index.js';
 import type { ApiLogEvent, ApiLogger } from './http/request-log.js';
 
 /**
@@ -81,6 +82,13 @@ export async function main(log: ApiLogger = consoleLogger): Promise<void> {
     gate: createPermissiveDealGate(),
     config,
     log,
+    // CHIEF FIX (2026-08-08): T-020 built the domain route suite and T-019
+    // built the server, but nothing wired one into the other — `buildServer`
+    // defaults `routes` to [], so the process booted serving only /healthz and
+    // the webhook plane while every deal, thread, message, offer and dealership
+    // route 404'd. Both tasks passed their own suites; the seam between them
+    // was what nobody owned.
+    routes: createRouteSuite(),
   });
   if (!server_result.ok) {
     await container.close();

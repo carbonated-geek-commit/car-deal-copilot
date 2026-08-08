@@ -1,4 +1,5 @@
 {
   "name": "@deal-copilot/adapters-credit-prequal",
-  "private": true
+  "private": true,
+  "type": "module"
 }
