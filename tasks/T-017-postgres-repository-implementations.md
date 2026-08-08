@@ -3,7 +3,7 @@ id: T-017
 title: Postgres repository implementations behind the unchanged comms ports (account-scoped)
 stage: build
 owner_agent: designer
-status: blocked
+status: deferred
 depends_on: [T-014, T-016]
 file_ownership:
   - "packages/store-pg/src/**"
@@ -53,3 +53,5 @@ mock_only: false
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
 undefined · designer · design published (docs/design/T-017.md); stage design → build; ESCALATION E1 — thread_contact_points FK to dealer_threads blocks bindThreadContact before first contact, needs an additive T-016 migration
+
+2026-08-08 - chief - DEFERRED per ADR-010. The block is real: Epic-1 comms ports are synchronous (in-memory heritage) and Postgres is async, with no synchronous pg client in the approved set. Rather than hide asynchrony behind a hydrate-then-serve unit of work, the ports themselves go async in a future task. Safe to defer because ADR-008 makes in-memory the default, so nothing in the working PoC depends on this. docs/design/T-017.md is retained as the input to that task.

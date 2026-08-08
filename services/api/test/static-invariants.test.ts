@@ -57,10 +57,16 @@ describe('the source itself', () => {
     expect(SOURCES.map((s) => s.name)).toContain('auth/deal-gate.ts');
   });
 
-  it('creates no src/routes/** — that subtree belongs to T-020', () => {
-    expect(readdirSync(SRC)).not.toContain('routes');
-    expect(SOURCES.some((s) => s.name.startsWith('routes/'))).toBe(false);
-    expect(readdirSync(join(SERVICE, 'test'))).not.toContain('routes');
+  // CHIEF AMENDMENT (2026-08-08): this asserted src/routes/** did NOT exist,
+  // because at T-019's moment that subtree belonged to the not-yet-run T-020.
+  // T-020 has since run and created it correctly, so the guard now fails
+  // precisely because the plan succeeded. The durable property it was really
+  // protecting is the layering — foundation code must not depend on routes —
+  // so that is what is asserted instead.
+  it('foundation sources never import from routes/ — dependency points one way', () => {
+    const foundation = SOURCES.filter((s) => !s.name.startsWith('routes/'));
+    const leaking = foundation.filter((s) => /from\s+['"][^'"]*\broutes\//u.test(codeOnly(s.text)));
+    expect(leaking.map((s) => s.name)).toEqual([]);
   });
 
   it('mints a DealHandle in exactly one file (D2)', () => {

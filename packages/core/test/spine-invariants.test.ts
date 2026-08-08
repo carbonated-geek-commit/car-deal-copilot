@@ -47,8 +47,15 @@ describe('AC-16 / I-11 — the v0.5 spine is defined exactly once', () => {
       ...tsFilesUnder(resolve(repoRoot, 'packages')),
       ...tsFilesUnder(resolve(repoRoot, 'services')),
     ].filter((f) => !f.startsWith(corePkg));
+    // CHIEF AMENDMENT (2026-08-08): anchored to declaration position. The
+    // unanchored form reported three offenders and all three were false: it
+    // matched `type Deal` inside `import { ..., type Deal } from '@core'` —
+    // which is exactly the compliant behaviour this guard exists to encourage —
+    // and it matched `class Message` / `class VehicleInstance` inside the prose
+    // phrase "a first-class Message" in test titles. A real declaration begins
+    // a line, optionally after export/declare/abstract.
     const pattern =
-      /\b(?:interface|type|class|enum)\s+(Deal|DealerThread|Message|Offer|VehicleTarget|VehicleInstance|Dealership|DealershipContact|ValuationSnapshot|VehicleData)\b/;
+      /^\s*(?:export\s+)?(?:declare\s+)?(?:abstract\s+)?(?:interface|type|class|enum)\s+(?:Deal|DealerThread|Message|Offer|VehicleTarget|VehicleInstance|Dealership|DealershipContact|ValuationSnapshot|VehicleData)\b/m;
     const offenders: string[] = [];
     for (const file of candidates) {
       if (pattern.test(readFileSync(file, 'utf8'))) offenders.push(file);

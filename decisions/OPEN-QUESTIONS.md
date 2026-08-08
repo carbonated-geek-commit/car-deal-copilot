@@ -145,3 +145,7 @@ The buyer writes notes and the extractor parses them (it is channel-agnostic, so
 ### Q22 — Ratify the `Message` shape
 **Context:** specs/00 carries `Message` marked "chief-proposed, awaiting ratification" (channel += `note`, `direction` += `internal`, new `author`, new `call_meta`), while specs/01's concierge honesty guarantee and the whole note-capture path already depend on it.
 **ANSWER:** **RATIFIED** — 2026-08-07 (Corban). `Message` carries `channel` (call|sms|email|note), `direction` (in|out|internal), `author` (dealer|buyer|concierge), `body`, optional `call_meta`, `timestamp`, optional `extracted_offer`.
+
+### Q23 — Comms ports are synchronous; Postgres is not *(logged, not blocking)*
+**Context:** T-017 could not implement Postgres repositories without either changing the Epic-1 comms port signatures (forbidden by its own acceptance criteria) or absorbing the mismatch in a hydrate-then-serve unit of work.
+**ANSWER:** Resolved by chief as **ADR-010** — T-017 deferred; the ports go async when Postgres repositories are actually built. Not blocking: ADR-008 makes the in-memory store the PoC default, so the working website does not depend on it. Logged here per Corban's standing instruction to record non-interface-breaking questions and keep building.
