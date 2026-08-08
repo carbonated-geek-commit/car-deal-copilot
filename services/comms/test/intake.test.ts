@@ -1,14 +1,17 @@
 /**
- * T-009 tester — webhook intake: the ack-then-queue decision table
- * (design §2.1, §4.1, §5.1 — BINDING; T-001 §5.2).
+ * T-014 tester — webhook intake: the ack-then-queue decision table
+ * (design §1.2, §3.1 — BINDING; T-001 §5.2; AC-11).
+ *
+ * `intake.ts` is the one module T-014 did not touch, so this suite is the
+ * regression evidence that the v0.5 re-basing left it behaving identically:
  *
  *   - 2xx ⇔ the inbound envelope is durably enqueued BEFORE any heavy work
- *     runs (no routing, no extraction, no transcription pre-ack);
- *   - enqueue failure ⇒ 503, the ONE deliberate non-ack (provider retry is
- *     the durability mechanism);
+ *     runs (no store read, no routing, no extraction pre-ack);
+ *   - enqueue failure ⇒ 503, the ONE deliberate non-ack (the provider's retry
+ *     is then the durability mechanism);
  *   - parse failure ⇒ quarantine event, STILL 2xx (no-drop rule);
- *   - an adapter that throws despite the sync-pure contract ⇒ treated as
- *     parse failure ⇒ quarantine + 200 (§5.1 row 4).
+ *   - an adapter that throws despite the sync-pure contract ⇒ treated as a
+ *     parse failure ⇒ quarantine + 200 (§3.1 row 2).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -17,15 +20,24 @@ import {
   InMemoryCommsStore,
   InMemoryQueue,
   InMemoryRawPayloadStore,
-  type TranscriptStub,
 } from '../src/index.js';
-import { ThrowingTelephonyAdapter, FixtureEmailAdapter } from './fixtures/adapters.js';
-import { IDENTITY_A, makeDeal, makeHarness, smsPayload, emailPayload } from './fixtures/harness.js';
+import {
+  FixtureEmailAdapter,
+  REMOVED_AUDIO_HANDLE_KEY,
+  ThrowingTelephonyAdapter,
+} from './fixtures/adapters.js';
+import {
+  emailPayload,
+  IDENTITY_A,
+  makeHarness,
+  seedDeal,
+  smsPayload,
+} from './fixtures/harness.js';
 
 describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
   it('parsed SMS acks 200/parsed with NO heavy work done yet; drain does the threading', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    seedDeal(h, 'deal-a', IDENTITY_A);
 
     const outcome = await h.service.intake.ingest(
       'telephony',
@@ -35,6 +47,7 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
     expect(outcome).toStrictEqual({ kind: 'enqueued', http_status: 200, disposition: 'parsed' });
     // Ack happened; heavy work has NOT: nothing threaded until the bus drains.
     expect(h.service.read.getDeal('deal-a')!.dealer_threads).toHaveLength(0);
+    expect(h.extractionRequests).toHaveLength(0);
 
     await h.queue.drain();
 
@@ -45,7 +58,7 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
 
   it('enqueue failure is a 503 — the one deliberate non-ack — and nothing is stored', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    seedDeal(h, 'deal-a', IDENTITY_A);
 
     h.queue.failNextPublishes(1);
     const failed = await h.service.intake.ingest('telephony', smsPayload({ ref: 'sms-1' }));
@@ -59,7 +72,7 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
 
   it('provider retry after our 503 lands exactly one message (redelivery dedupes downstream)', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    seedDeal(h, 'deal-a', IDENTITY_A);
     const payload = smsPayload({ ref: 'sms-1', body: 'The price is $23,500 for this one.' });
 
     h.queue.failNextPublishes(1);
@@ -77,7 +90,7 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
 
   it('parse failure still acks 200/quarantined; the raw payload is stashed and operator-visible', async () => {
     const h = makeHarness();
-    h.store.putDeal(makeDeal('deal-a', IDENTITY_A));
+    seedDeal(h, 'deal-a', IDENTITY_A);
     const garbage = { totally: 'not-a-normalized-payload', n: 42 };
 
     const outcome = await h.service.intake.ingest('telephony', garbage);
@@ -100,7 +113,7 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
     expect(h.service.read.listUnrouted()).toHaveLength(0);
   });
 
-  it('redelivered garbage dedupes on the deterministic quarantine key (D2): one record', async () => {
+  it('redelivered garbage dedupes on the deterministic quarantine key: one record', async () => {
     const h = makeHarness();
     const garbage = { b: 2, a: 1 };
     // Structurally equal payload with different key order — canonical JSON
@@ -126,12 +139,13 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
     expect(h.service.read.listQuarantined()).toHaveLength(1);
   });
 
-  it('an adapter that THROWS despite the sync-pure contract is treated as parse failure: 200 + quarantine (§5.1 row 4)', async () => {
+  it('an adapter that THROWS despite the sync-pure contract is treated as parse failure: 200 + quarantine', async () => {
     // Assemble a service around the defective adapter with fresh infrastructure.
+    // Note what is NOT in this dependency list any more: there is no
+    // speech-capture port to inject — the seam was deleted, not stubbed (D1).
     const queue = new InMemoryQueue();
     const store = new InMemoryCommsStore();
     const raw = new InMemoryRawPayloadStore();
-    const stub: TranscriptStub = { transcriptFor: () => undefined };
     let eid = 0;
     const service = createCommsService({
       telephony: new ThrowingTelephonyAdapter(),
@@ -139,7 +153,6 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
       queue,
       store,
       raw_payloads: raw,
-      transcribe: stub,
       now: () => '2026-08-07T12:00:00.000Z',
       new_event_id: () => `t-evt-${++eid}`,
     });
@@ -171,5 +184,33 @@ describe('ack-then-queue: 2xx = enqueued before heavy work', () => {
 
     expect(h.service.read.listQuarantined()).toHaveLength(1);
     expect(h.service.read.listQuarantined()[0]!.source).toBe('fixture-email');
+  });
+
+  it('a call payload still carrying the removed v0.4 audio handle is provider drift: quarantined, never threaded', async () => {
+    // The spine has no field for it, so the only honest disposition is "this
+    // provider shape is not an inbound message" — 200 + quarantine, held for
+    // an operator, and NOT silently accepted with the field dropped.
+    const h = makeHarness();
+    seedDeal(h, 'deal-a', IDENTITY_A);
+
+    const legacy: Record<string, unknown> = {
+      channel: 'call',
+      to_identity: { phone_number: IDENTITY_A.phone_number },
+      from: { phone: '+15550200001' },
+      provider_message_ref: 'call-legacy',
+      received_at: '2026-08-07T10:05:00.000Z',
+    };
+    legacy[REMOVED_AUDIO_HANDLE_KEY] = 'audio-handle-1';
+
+    const outcome = await h.service.intake.ingest('telephony', legacy);
+    expect(outcome).toStrictEqual({
+      kind: 'enqueued',
+      http_status: 200,
+      disposition: 'quarantined',
+    });
+    await h.queue.drain();
+
+    expect(h.service.read.listQuarantined()).toHaveLength(1);
+    expect(h.service.read.getDeal('deal-a')!.dealer_threads).toHaveLength(0);
   });
 });
