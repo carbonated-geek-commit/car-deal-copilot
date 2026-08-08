@@ -7,9 +7,14 @@
  * combines them into the wholesale vs trade-in vs retail view emitted as a
  * cached, timestamped `ValuationSnapshot`.
  *
+ * v0.5 (T-013): every snapshot names a `vehicle_instance_id` and every request
+ * carries the instance's own year, trim, mileage and condition — a valuation of
+ * a bare make/model is not expressible through this surface. Private-party
+ * value is KBB's band (Q15); no comps, marketplace or scraping source exists.
+ *
  * mock_only: no provider SDK, endpoint, credential, or HTTP exists anywhere in
  * this package — fixtures are the entire data source (CLAUDE.md invariant 2).
- * No KBB- or Manheim-specific shape is exported or expressible (AC-1).
+ * No KBB- or Manheim-specific shape is exported or expressible.
  */
 
 export {

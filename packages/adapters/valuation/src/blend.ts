@@ -1,17 +1,25 @@
 /**
  * The blend step (specs/00 "Valuation": "Blend into wholesale vs trade-in vs
- * retail.").
+ * retail. Snapshot + cache."), rebound to the v0.5 spine (T-013 §2.3, §3.4).
  *
- * Two pieces (docs/design/T-003.md D1, §4.3):
+ * Two pieces:
  * - `blendSnapshots` — a pure merge over per-source `ValuationSnapshot`s.
  * - `createBlendedValuationAdapter` — a composite that IS a `ValuationAdapter`,
  *   so callers see exactly one shape whether they talk to a single source or
  *   the blend (anti-corruption rule stays airtight).
+ *
+ * A `ValuationSnapshot` is ALWAYS of one specific car, so the blend is too: a
+ * contributing snapshot naming a different `vehicle_instance_id` is DISCARDED
+ * rather than averaged in (D6). Averaging two cars would produce a snapshot of
+ * nothing, which is exactly the incomparability the one-vehicle rule exists to
+ * prevent — and it would let another car's `retail` become this car's
+ * `above_market` basis (ADR-007).
  */
 
 import type {
   AdapterError,
   AdapterResult,
+  MoneyCents,
   ValuationAdapter,
   ValuationRequest,
   ValuationSnapshot,
@@ -20,83 +28,107 @@ import type {
 /** Blend provenance: 'blend(' + contributing sources joined by '+' + ')' — e.g. "blend(mock-kbb+mock-manheim)". */
 export const BLEND_SOURCE_PREFIX = 'blend(';
 
-const VALUE_FIELDS = ['wholesale', 'trade_in', 'retail', 'private_party'] as const;
+/** The flat spine bands, in the spec's own order. */
+const BAND_FIELDS = ['wholesale', 'trade_in', 'retail', 'private_party'] as const;
+
+type BandField = (typeof BAND_FIELDS)[number];
 
 function blendSource(sources: readonly string[]): string {
   return `${BLEND_SOURCE_PREFIX}${sources.join('+')})`;
 }
 
 /**
- * Pure merge (no I/O): combines per-source snapshots into the spec's
- * wholesale vs trade-in vs retail view.
+ * Pure merge (no I/O), total. Blending zero snapshots is a COMPILE error
+ * (non-empty tuple), so no empty-input runtime path exists.
  *
- * Rules (docs/design/T-003.md D2, D3, §4.3):
- * - Each `values` field is taken from the snapshot that supplies it; if more
- *   than one snapshot supplies the same field (mis-wired roles), the most
- *   recent `fetched_at` wins (ties: earliest in the input order) — deterministic.
- * - `fetched_at` = OLDEST contributing `fetched_at` (D3): the blend is only as
- *   fresh as its stalest input, keeping caller-side cache logic conservative.
- * - `source` = 'blend(' + contributing sources in input order joined '+' + ')'.
- * - `vehicle` / `mileage` are taken from the first snapshot; the composite
- *   adapter overrides them with an echo of the request.
- *
- * Non-empty tuple type: blending zero snapshots is a compile-time error, so no
- * runtime failure path exists (§4.2).
+ * Rules (T-013 §2.3):
+ * - `vehicle_instance_id` = `snapshots[0].vehicle_instance_id`. Any snapshot
+ *   naming a different instance is DISCARDED before merging (D6) and is absent
+ *   from `source`. The head always survives, so a non-empty input always yields
+ *   a result.
+ * - Each band is taken from the surviving snapshot that supplies it; if more
+ *   than one does, the newest `captured_at` wins (ties: earliest input order).
+ * - `captured_at` = OLDEST surviving `captured_at`: the blend is only as fresh
+ *   as its stalest input, keeping caller-side cache logic conservative.
+ * - `source` = 'blend(' + surviving sources in input order joined '+' + ')'.
+ * - A band no survivor supplies is ABSENT, never zero (ADR-005).
  */
 export function blendSnapshots(
   snapshots: readonly [ValuationSnapshot, ...ValuationSnapshot[]],
 ): ValuationSnapshot {
-  const values: ValuationSnapshot['values'] = {};
-  for (const field of VALUE_FIELDS) {
+  const head = snapshots[0];
+  const instanceId = head.vehicle_instance_id;
+  // D6: a blend is always of one specific car. The head is its own match, so
+  // `survivors` is never empty.
+  const survivors = snapshots.filter((s) => s.vehicle_instance_id === instanceId);
+
+  const bands: Partial<Record<BandField, MoneyCents>> = {};
+  for (const field of BAND_FIELDS) {
     let winner: ValuationSnapshot | undefined;
-    for (const snap of snapshots) {
-      if (snap.values[field] === undefined) continue;
-      if (winner === undefined || Date.parse(snap.fetched_at) > Date.parse(winner.fetched_at)) {
+    for (const snap of survivors) {
+      if (snap[field] === undefined) continue;
+      if (
+        winner === undefined ||
+        Date.parse(snap.captured_at) > Date.parse(winner.captured_at)
+      ) {
         winner = snap;
       }
     }
-    const v = winner?.values[field];
-    if (v !== undefined) values[field] = v;
+    const v = winner?.[field];
+    if (v !== undefined) bands[field] = v;
   }
 
-  let oldest: ValuationSnapshot = snapshots[0];
-  for (const snap of snapshots) {
-    if (Date.parse(snap.fetched_at) < Date.parse(oldest.fetched_at)) oldest = snap;
+  let oldest: ValuationSnapshot = head;
+  for (const snap of survivors) {
+    if (Date.parse(snap.captured_at) < Date.parse(oldest.captured_at)) oldest = snap;
   }
 
-  const first = snapshots[0];
   return {
-    vehicle: first.vehicle,
-    values,
-    source: blendSource(snapshots.map((s) => s.source)),
-    fetched_at: oldest.fetched_at,
-    ...(first.mileage !== undefined ? { mileage: first.mileage } : {}),
+    vehicle_instance_id: instanceId,
+    ...bands,
+    source: blendSource(survivors.map((s) => s.source)),
+    captured_at: oldest.captured_at,
   };
 }
 
-/** Sources feeding the composite. Roles, not providers — anti-corruption holds. */
+/** Sources feeding the composite. Roles, not providers — anti-corruption holds at the composite too. */
 export interface BlendedValuationSources {
-  /** KBB-mock in Epic 1; any ValuationAdapter later. */
+  /**
+   * KBB-mock today: retail, trade-in, and (Q15) private-party bands.
+   * Deliberately NOT renamed — the field names the specs/00 "Valuation" table
+   * row it wires, and a rename would churn every composition root for no gain.
+   */
   retail_trade_in: ValuationAdapter;
-  /** Manheim-mock in Epic 1. */
+  /** Manheim-mock today: wholesale. */
   wholesale: ValuationAdapter;
-  /** Deliberately open third slot (specs/00 Valuation row 3). NOT implemented in Epic 1 (D9). */
+  /**
+   * Deliberately DECLARED BUT UNWIRED (D5). Q15 RESOLVED admits no comps or
+   * marketplace source — Meta publishes no API and scraping violates their
+   * terms, and buyer-entered comps are user data rather than an external feed,
+   * so they have no home in the anti-corruption layer at all. A licensed
+   * aggregator is a future option; nothing in this repo may fill this slot
+   * without a new ADR.
+   */
   private_party?: ValuationAdapter;
 }
 
 /**
- * Composite ValuationAdapter (D1): fans getValuation out to each wired source
- * concurrently, blends per §4.3, returns one AdapterResult<ValuationSnapshot>.
+ * Composite `ValuationAdapter`: fans `getValuation` out to each wired source
+ * concurrently, blends per §3.4, returns one `AdapterResult<ValuationSnapshot>`.
  *
- * Outcomes (docs/design/T-003.md §4.3):
+ * Outcomes (T-013 §7.2):
  * - All ok → blended snapshot; `source` names every contributor.
- * - Some fail, ≥1 ok → `ok` PARTIAL snapshot (D2): only surviving sources'
- *   fields present; `source` names contributors only, so provenance doubles as
- *   the degradation signal.
- * - All fail → one AdapterError: a retryable error wins over a terminal one;
- *   among equals the retail_trade_in-role error wins (wired-role order —
- *   deterministic). `source` = the blend id; `message` names contributor codes
- *   only (log-safe); `retryable` = OR of contributors.
+ * - Some fail, ≥1 ok → `ok` PARTIAL snapshot: only surviving sources' bands are
+ *   present. Missing bands are ABSENT, never zero (ADR-005); `source` names
+ *   contributors only, so provenance doubles as the degradation signal and no
+ *   side channel is needed.
+ * - All fail → one `AdapterError`: a retryable contributor's code wins over a
+ *   terminal one; among equals the wired-role order decides (deterministic).
+ *   `source` = the blend id; `message` names contributor codes only (log-safe);
+ *   `retryable` = OR over contributors.
+ *
+ * Stateless: no internal retry, no caching. "Snapshot + cache" is caller-side
+ * (the store layer), so repeated calls are idempotent.
  */
 export function createBlendedValuationAdapter(
   sources: BlendedValuationSources,
@@ -128,7 +160,7 @@ export function createBlendedValuationAdapter(
       });
 
       if (survivors.length === 0) {
-        // All wired sources failed → single error (§4.3, precedence rule).
+        // All wired sources failed → single error (§7.2, precedence rule).
         let chosen = failures[0] as { role: string; error: AdapterError };
         for (const f of failures) {
           if (f.error.retryable && !chosen.error.retryable) chosen = f;
@@ -146,18 +178,15 @@ export function createBlendedValuationAdapter(
         };
       }
 
-      const [head, ...rest] = survivors as [ValuationSnapshot, ...ValuationSnapshot[]];
-      const blended = blendSnapshots([head, ...rest]);
+      const [first, ...rest] = survivors as [ValuationSnapshot, ...ValuationSnapshot[]];
+      const blended = blendSnapshots([first, ...rest]);
 
-      // vehicle/mileage echoed from the request (§4.3).
-      const snapshot: ValuationSnapshot = {
-        vehicle: req.vehicle,
-        values: blended.values,
-        source: blended.source,
-        fetched_at: blended.fetched_at,
-        ...(req.mileage !== undefined ? { mileage: req.mileage } : {}),
+      // The composite stamps the requested instance — authoritative, because
+      // every contributor was asked about that same car (§3.4).
+      return {
+        ok: true,
+        value: { ...blended, vehicle_instance_id: req.instance.id },
       };
-      return { ok: true, value: snapshot };
     },
   };
 }
