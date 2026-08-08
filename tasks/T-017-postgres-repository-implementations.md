@@ -1,9 +1,9 @@
 ---
 id: T-017
 title: Postgres repository implementations behind the unchanged comms ports (account-scoped)
-stage: design
+stage: build
 owner_agent: designer
-status: pending
+status: blocked
 depends_on: [T-014, T-016]
 file_ownership:
   - "packages/store-pg/src/**"
@@ -52,3 +52,4 @@ mock_only: false
 
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
+undefined · designer · design published (docs/design/T-017.md); stage design → build; ESCALATION E1 — thread_contact_points FK to dealer_threads blocks bindThreadContact before first contact, needs an additive T-016 migration
