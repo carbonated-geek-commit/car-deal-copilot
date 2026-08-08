@@ -96,7 +96,7 @@ The buyer writes notes and the extractor parses them (it is channel-agnostic, so
 
 ### Q15 — Private-party / marketplace comps
 **Context:** Corban asked for KBB private-party value plus Facebook Marketplace vehicles. Meta publishes no Marketplace API; automated scraping violates their ToS and carries legal and blocking risk.
-**ANSWER:** PENDING — KBB private-party is already covered by the existing mock-only KBB approval; the Marketplace sourcing method (user-pasted listings vs. licensed aggregator vs. other classifieds with real APIs) is still Corban's call. Blocks the valuation epic only.
+**ANSWER:** ~~PENDING~~ **SUPERSEDED — see the resolved Q15 in the second-pass section below** (buyer sources their own comps; app recommends marketplaces; no Facebook integration; 2026-08-07).
 
 ---
 
