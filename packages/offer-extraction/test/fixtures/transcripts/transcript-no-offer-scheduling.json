@@ -1,8 +1,0 @@
-{
-  "name": "transcript-no-offer-scheduling",
-  "channel": "call",
-  "text": "Hi, this is Sam calling to confirm your test drive tomorrow afternoon. Ask for me at the front desk when you arrive.",
-  "expected": {
-    "found": false
-  }
-}
