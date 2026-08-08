@@ -1,0 +1,8 @@
+{
+  "name": "@deal-copilot/api",
+  "private": true,
+  "dependencies": {
+    "fastify": "^5",
+    "zod": "^4"
+  }
+}
