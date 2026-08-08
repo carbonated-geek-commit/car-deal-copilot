@@ -2,7 +2,7 @@
 id: T-016
 title: Postgres schema + migrations for the v0.5 relational core (tenancy split, append-only receipt)
 stage: validate
-owner_agent: tester
+owner_agent: fixer
 status: in_progress
 depends_on: [T-010, T-015]
 file_ownership:
@@ -62,3 +62,4 @@ mock_only: false
 2026-08-07 15:30 · designer · design complete → docs/design/T-016.md (composite-FK tenancy, 3-layer append-only receipt, target-by-arity); stage → build
 undefined · builder · build complete → 14 forward-only migrations + @db (config/errors/pool/migrate/schema); typecheck green; no live Postgres available here, so the DDL is unexecuted — tester must run it; stage → test
 undefined · tester · 171 tests across 5 files (131 always-on, 40 DATABASE_URL-gated and SKIPPED — no Postgres here, ADR-008); 2 FAIL: messages_thread_fk and offers_thread_fk omit deal_id, so a message/offer can name one deal while pointing at a thread of another (dealer_threads_account_deal_id_uk exists for exactly this and is referenced by nothing); stage → validate
+undefined · fixer · closed the cross-deal binding family: messages_thread_fk/offers_thread_fk/messages_extracted_offer_fk/dealer_threads_current_offer_fk now carry deal_id (new offers_account_deal_id_uk backs the offer side), deals_receipt_bundle_uk gives a bundle to one deal, deal_identities_owner_pinned (DC003) stops a released number/alias being reassigned to another account; 181 tests, 136 pass / 45 DATABASE_URL-gated SKIPPED (ADR-008), packages/db typecheck green; stage stays validate

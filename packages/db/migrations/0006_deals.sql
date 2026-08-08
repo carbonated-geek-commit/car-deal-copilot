@@ -40,6 +40,13 @@ CREATE TABLE deals (
   CONSTRAINT deals_pkey PRIMARY KEY (id),
   CONSTRAINT deals_account_id_uk UNIQUE (account_id, id),
 
+  -- ONE bundle per deal (specs/00 Core domain model, `Deal.receipt_bundle_id`).
+  -- receipt_entries key only on receipt_bundle_id, so two deals sharing a bundle
+  -- would put deal B's evidence inside a dossier assembled for deal A with
+  -- nothing anywhere able to detect it. NULL is unconstrained by a UNIQUE in
+  -- Postgres, so a deal with no bundle yet stays legal.
+  CONSTRAINT deals_receipt_bundle_uk UNIQUE (receipt_bundle_id),
+
   -- @core YearRange requires BOTH fields: both present or both absent.
   CONSTRAINT deals_year_range_paired
     CHECK ((target_year_from IS NULL) = (target_year_to IS NULL)),

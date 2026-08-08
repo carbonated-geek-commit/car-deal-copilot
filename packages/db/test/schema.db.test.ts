@@ -305,6 +305,46 @@ describeDb('T-016 schema against a real Postgres', () => {
     expect(error.code).toBe('foreign_key_violation');
   });
 
+  it('cannot bind an offer to a thread belonging to ANOTHER DEAL', async () => {
+    const error = await failure(
+      `INSERT INTO offers (account_id, deal_id, thread_id, sale_price_cents)
+       VALUES ($1, $2, $3, 2900000)`,
+      [ids.accountA, ids.dealA, ids.threadA2],
+    );
+    expect(error.code).toBe('foreign_key_violation');
+    expect(error.constraint).toBe('offers_thread_fk');
+  });
+
+  it('cannot link a message to an extracted offer from ANOTHER DEAL', async () => {
+    const strangerOffer = await scalar(
+      'INSERT INTO offers (account_id, deal_id) VALUES ($1, $2) RETURNING id AS v',
+      [ids.accountA, ids.dealA2],
+    );
+    const error = await failure(
+      `INSERT INTO messages (account_id, deal_id, thread_id, channel, direction, author,
+                             body, occurred_at, message_ref, origin_kind, origin_source,
+                             extracted_offer_id)
+       VALUES ($1, $2, $3, 'sms', 'in', 'dealer', 'hi', now(), 'x-cross-deal-offer',
+               'provider', 'mock', $4)`,
+      [ids.accountA, ids.dealA, ids.threadA, strangerOffer],
+    );
+    expect(error.code).toBe('foreign_key_violation');
+    expect(error.constraint).toBe('messages_extracted_offer_fk');
+  });
+
+  it('cannot name ANOTHER DEAL offer as a thread current offer (ADR-006, AC-8)', async () => {
+    const strangerOffer = await scalar(
+      'INSERT INTO offers (account_id, deal_id) VALUES ($1, $2) RETURNING id AS v',
+      [ids.accountA, ids.dealA2],
+    );
+    const error = await failure('UPDATE dealer_threads SET current_offer_id = $1 WHERE id = $2', [
+      strangerOffer,
+      ids.threadA,
+    ]);
+    expect(error.code).toBe('foreign_key_violation');
+    expect(error.constraint).toBe('dealer_threads_current_offer_fk');
+  });
+
   it('gives every account-scoped table a NOT NULL account_id', async () => {
     for (const table of ACCOUNT_SCOPED_TABLES) {
       const found = await rows<{ is_nullable: string }>(
@@ -661,6 +701,53 @@ describeDb('T-016 schema against a real Postgres', () => {
       [ids.accountB, ids.dealB],
     );
     expect(error.code).toBe('unique_violation');
+  });
+
+  it('never reassigns a released number to ANOTHER account, but lets the SAME one re-use it', async () => {
+    expectOk(
+      await run(
+        `INSERT INTO deal_identities (account_id, deal_id, identity_id, phone_number, bound_at)
+         VALUES ($1, $2, 'id-reuse-1', '+15550002222', now())`,
+        [ids.accountA, ids.dealA],
+      ),
+    );
+    // Burn: the binding is retired, never deleted (specs/01 number lifecycle).
+    expectOk(
+      await run(
+        "UPDATE deal_identities SET released_at = now() WHERE identity_id = 'id-reuse-1'",
+      ),
+    );
+
+    // specs/01: "never reassigned to another platform user (zero cross-user
+    // leakage)". The partial unique index cannot see this — the row is released.
+    const error = await failure(
+      `INSERT INTO deal_identities (account_id, deal_id, identity_id, phone_number, bound_at)
+       VALUES ($1, $2, 'id-reuse-2', '+15550002222', now())`,
+      [ids.accountB, ids.dealB],
+    );
+    expect(error.sqlstate).toBe('DC003');
+    expect(error.code).toBe('tenancy_violation');
+
+    // Re-use (Q2) is the SAME user carrying a number into a new deal, so it stays legal.
+    expectOk(
+      await run(
+        `INSERT INTO deal_identities (account_id, deal_id, identity_id, phone_number, bound_at)
+         VALUES ($1, $2, 'id-reuse-3', '+15550002222', now())`,
+        [ids.accountA, ids.dealA2],
+      ),
+    );
+  });
+
+  it('gives a receipt bundle to at most ONE deal', async () => {
+    expectOk(
+      await run('UPDATE deals SET receipt_bundle_id = $1 WHERE id = $2', [ids.bundleA, ids.dealA]),
+    );
+    const error = await failure('UPDATE deals SET receipt_bundle_id = $1 WHERE id = $2', [
+      ids.bundleA,
+      ids.dealA2,
+    ]);
+    expect(error.code).toBe('unique_violation');
+    expect(error.constraint).toBe('deals_receipt_bundle_uk');
   });
 
   it('processes an event once, platform-wide', async () => {

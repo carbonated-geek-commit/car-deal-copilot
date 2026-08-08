@@ -46,11 +46,21 @@ CREATE TABLE messages (
   CONSTRAINT messages_deal_fk
     FOREIGN KEY (account_id, deal_id) REFERENCES deals (account_id, id)
     ON DELETE RESTRICT,
+  -- Carries the DEAL, not only the account (AC-5). A message holds both
+  -- deal_id and thread_id; constrained independently they can disagree, and an
+  -- account that owns two deals is not a boundary between them — the account
+  -- chain cannot catch a message naming deal A while pointing at a thread of
+  -- deal A2. dealer_threads publishes UNIQUE (account_id, deal_id, id) for
+  -- exactly this referrer.
   CONSTRAINT messages_thread_fk
-    FOREIGN KEY (account_id, thread_id) REFERENCES dealer_threads (account_id, id)
+    FOREIGN KEY (account_id, deal_id, thread_id)
+    REFERENCES dealer_threads (account_id, deal_id, id)
     ON DELETE RESTRICT,
+  -- Same family: the extracted offer must belong to THIS message's deal, not
+  -- merely to the same account. MATCH SIMPLE keeps an unextracted message legal.
   CONSTRAINT messages_extracted_offer_fk
-    FOREIGN KEY (account_id, extracted_offer_id) REFERENCES offers (account_id, id)
+    FOREIGN KEY (account_id, deal_id, extracted_offer_id)
+    REFERENCES offers (account_id, deal_id, id)
     ON DELETE RESTRICT,
 
   CONSTRAINT messages_call_shape

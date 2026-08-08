@@ -23,11 +23,24 @@ CREATE TABLE offers (
 
   CONSTRAINT offers_pkey PRIMARY KEY (id),
   CONSTRAINT offers_account_id_uk UNIQUE (account_id, id),
+  -- The referencable triple for every DEAL-SCOPED referrer of an offer
+  -- (`messages.extracted_offer_id`, `dealer_threads.current_offer_id`). Without
+  -- it those foreign keys can only carry the account, and an account that owns
+  -- two deals is not a boundary between them.
+  CONSTRAINT offers_account_deal_id_uk UNIQUE (account_id, deal_id, id),
   CONSTRAINT offers_deal_fk
     FOREIGN KEY (account_id, deal_id) REFERENCES deals (account_id, id)
     ON DELETE RESTRICT,
+  -- Carries the DEAL, not only the account. `offers` holds both deal_id and
+  -- thread_id, so an account-only foreign key lets one row claim deal A while
+  -- pointing at a thread of deal B — both deals share the account, so the
+  -- account chain cannot catch it. The three-column form is what
+  -- dealer_threads_account_deal_id_uk was published for. MATCH SIMPLE (the
+  -- default) keeps a NULL thread legal, so the deal-level offer record that
+  -- has not been attributed to a thread yet still inserts.
   CONSTRAINT offers_thread_fk
-    FOREIGN KEY (account_id, thread_id) REFERENCES dealer_threads (account_id, id)
+    FOREIGN KEY (account_id, deal_id, thread_id)
+    REFERENCES dealer_threads (account_id, deal_id, id)
     ON DELETE RESTRICT,
   CONSTRAINT offers_sale_price_nonneg
     CHECK (sale_price_cents IS NULL OR sale_price_cents >= 0),
@@ -75,8 +88,14 @@ CREATE TABLE offer_flags (
 GRANT SELECT, INSERT, UPDATE ON offer_flags TO deal_copilot_app;
 
 -- ---- back-fill the thread -> current_offer edge (design §3.4) ---------
+-- Deal-carrying for the same reason as offers_thread_fk: ADR-006's rollup and
+-- the third disjunct of the 0014 write-once trigger both read
+-- `current_offer_id`, so a thread of deal A naming deal B's offer would decide
+-- deal A's lock from another deal's evidence. MATCH SIMPLE keeps "no current
+-- offer yet" legal.
 
 ALTER TABLE dealer_threads
   ADD CONSTRAINT dealer_threads_current_offer_fk
-  FOREIGN KEY (account_id, current_offer_id) REFERENCES offers (account_id, id)
+  FOREIGN KEY (account_id, deal_id, current_offer_id)
+  REFERENCES offers (account_id, deal_id, id)
   ON DELETE RESTRICT;

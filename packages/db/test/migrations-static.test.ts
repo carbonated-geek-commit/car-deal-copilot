@@ -203,6 +203,54 @@ describe('the tenancy split, enforced by the schema (AC-3, AC-4, AC-5)', () => {
     expect(fk.targetColumns).toEqual(['account_id', 'deal_id', 'id']);
   });
 
+  it('publishes the referencable triple every deal-scoped referrer of an offer needs', () => {
+    // Without UNIQUE (account_id, deal_id, id) on `offers`, the two foreign keys
+    // below cannot carry the deal at all — an account that owns two deals is not
+    // a boundary between them.
+    expect(tableNamed(TABLES.offers).body.replace(/\s+/g, ' ')).toContain(
+      'CONSTRAINT offers_account_deal_id_uk UNIQUE (account_id, deal_id, id)',
+    );
+  });
+
+  it('never lets a message link an extracted offer from ANOTHER DEAL', () => {
+    const fk = foreignKeyNamed('messages_extracted_offer_fk');
+    expect(fk.columns).toEqual(['account_id', 'deal_id', 'extracted_offer_id']);
+    expect(fk.target).toBe(TABLES.offers);
+    expect(fk.targetColumns).toEqual(['account_id', 'deal_id', 'id']);
+  });
+
+  it('never lets a thread name ANOTHER DEAL offer as its current offer (ADR-006, AC-8)', () => {
+    // current_offer_id feeds ADR-006's rollup AND the third disjunct of the
+    // 0014 write-once trigger, so a mis-bound edge decides one deal's lock from
+    // another deal's evidence.
+    const fk = foreignKeyNamed('dealer_threads_current_offer_fk');
+    expect(fk.columns).toEqual(['account_id', 'deal_id', 'current_offer_id']);
+    expect(fk.target).toBe(TABLES.offers);
+    expect(fk.targetColumns).toEqual(['account_id', 'deal_id', 'id']);
+  });
+
+  it('gives a receipt bundle to at most ONE deal — a dossier is never two deals evidence', () => {
+    // receipt_entries key only on receipt_bundle_id, so a shared bundle puts
+    // deal B's evidence inside deal A's dossier with nothing able to detect it.
+    expect(tableNamed(TABLES.deals).body.replace(/\s+/g, ' ')).toContain(
+      'CONSTRAINT deals_receipt_bundle_uk UNIQUE (receipt_bundle_id)',
+    );
+  });
+
+  it('never reassigns a released number or alias to another account (specs/01 zero cross-user leakage)', () => {
+    // The partial unique indexes only bind ACTIVE values. specs/01: a burned
+    // number is "never reassigned to another platform user"; Re-use is the SAME
+    // user carrying a number into a new deal.
+    expect(code).toMatch(
+      /CREATE\s+TRIGGER\s+deal_identities_owner_pinned\s+AFTER\s+INSERT\s+OR\s+UPDATE\s+ON\s+deal_identities/i,
+    );
+    const body = code.replace(/\s+/g, ' ');
+    expect(body).toContain('d.phone_number = NEW.phone_number');
+    expect(body).toContain('d.email_alias = NEW.email_alias');
+    expect(body).toContain('d.account_id <> NEW.account_id');
+    expect(body).toContain("ERRCODE = 'DC003'");
+  });
+
   it('scopes the inbound contact-point index to one deal at the index level', () => {
     const points = tableNamed(TABLES.thread_contact_points);
     expect(points.body.replace(/\s+/g, ' ')).toContain(
