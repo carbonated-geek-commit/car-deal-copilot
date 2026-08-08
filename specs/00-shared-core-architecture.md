@@ -31,35 +31,40 @@ Deal
 ├── id, owner_id            (owner = User in consumer, Org/Seat in B2B)
 ├── path                    (online | hybrid | in_person)   ← consumer-driven; B2B may ignore
 ├── status                  (draft | active | negotiating | closed | burned)
-├── target_vehicle          (VehicleSpec — EXACTLY ONE, immutable after first offer)
-├── resolved_vehicle        (VIN, once identified)
+├── target_vehicle          (VehicleTarget — make + model; IMMUTABLE once any offer attaches)
 ├── budget, walk_away_number
 ├── identity_ref            (→ provider-agnostic; see Comms below)
-├── dealer_threads[]        (MANY dealerships may sit inside one deal)
-├── offers[]
+├── dealer_threads[]        (MANY dealerships, each offering its own specific car)
+├── offers[]                (flattened offer history across threads)
 ├── receipt_bundle_id
 └── created_at, burned_at
 
-VehicleSpec
-├── make, model, year, trim
-├── mileage                 (odometer; absent for new)
+VehicleTarget               (what the buyer is shopping — the deal's comparison anchor)
+├── make, model             ← immutable after first offer; changing these = a NEW Deal
+└── year_range?             (optional span; see "year drift" below)
+
+VehicleInstance             (the SPECIFIC car one dealership is offering — varies per thread)
+├── vin?                    (user-entered, for the buyer's record; no lookup at launch)
+├── year
+├── trim?                   (trim may differ freely between dealerships)
+├── mileage?                (odometer; absent for new)
 ├── condition               (new | used | certified)
-└── additions[]             (options, packages, dealer add-ons)
+└── additions[]             (options, packages, dealer add-ons, accessories)
 
-Dealership                  (shared entity — many deals may reference the same one)
+Dealership                  (GLOBAL — one shared record, referenced by any account's deals)
 ├── id, name
-├── state, city, zip_code
-└── staff[]                 (StaffMember: name + role)
+└── state, city, zip_code
 
-StaffMember
-└── name, role              (general_manager | sales_manager | finance_manager | sales_agent)
+DealershipContact           (PRIVATE to the account — never global, never shared)
+├── name, role              (general_manager | sales_manager | finance_manager | sales_agent)
+└── phone?, email?
 
 DealerThread                (the per-deal relationship with ONE dealership)
-├── dealership_id           (→ Dealership)
-├── working_with            (→ StaffMember — who you are dealing with right now)
+├── dealership_id           (→ Dealership, global)
+├── vehicle_instance        (→ VehicleInstance — this dealership's specific car)
+├── working_with            (→ DealershipContact, private to the account)
 ├── process_step            (information_gather | deal_negotiation | deal_approval
 │                            | financing | final_sale | pickup)
-├── contact info
 ├── messages[]
 └── current_offer
 
@@ -81,13 +86,27 @@ ValuationSnapshot · VehicleData   (cached, timestamped)
 
 ### Cardinality invariants (structurally enforced)
 
-**One deal, one vehicle — always.** `Account → Deal → Vehicle` is strictly 1:1. A deal never covers two vehicles; `Account1 → Deal1 → Vehicle2` must be unrepresentable, not merely discouraged.
+**One deal, one make/model — always.** A deal is anchored to a single `make` + `model`. That anchor is what the whole product rests on.
 
-**One deal, many dealerships.** `Deal.dealer_threads[]` holds a thread per dealership, which is what makes the side-by-side war room work — the same vehicle spec shopped against several dealers at once.
+**Why — the load-bearing reason:** *one vehicle per deal is the only way to honestly tell a customer whether they are getting a good deal.* Valuation, walk-away, and every flag are comparisons against a known thing. Let a deal span two different vehicles and there is no longer anything to compare against — "is this a good price?" stops having an answer, and the product's central promise quietly becomes unanswerable. The constraint exists to protect the honesty of the verdict, not to police the buyer.
 
-**Why the vehicle is immutable:** a dealership that can't deliver the car you came for will try to move you onto whatever is on their lot ("that one just sold, but I've got this other one…"). If a deal's vehicle could be swapped in place, that substitution would vanish into an existing negotiation, taking its valuation, walk-away number, and offer history with it. **Switching vehicles requires opening a new Deal.** The switch therefore always leaves a mark in the receipt trail, and the abandoned deal stands as evidence of the bait-and-switch.
+*Secondary benefit (not the reason):* because a switch to a different make/model forces a new deal, a dealership's "that one just sold, but I've got this other one…" move can't be laundered inside an existing negotiation. Defending against that tactic is something the design supports; it is not why the design exists.
 
-*Enforcement:* `target_vehicle` is write-once — settable while the deal is `draft`, immutable once any offer is attached. An attempted change is rejected, not silently applied, and the rejection is a receipt-trail event.
+**One deal, many dealerships — each with its own car.** `Deal.dealer_threads[]` holds a thread per dealership, and **each thread carries its own `VehicleInstance`**. Three dealerships offering the same model will differ in VIN, year, trim, mileage, and add-ons — that variation is the negotiation, so it lives per thread, never on the deal.
+
+**What is fixed vs. what varies once a deal starts:**
+
+| Fixed for the life of the deal | Varies per dealership / offer |
+|---|---|
+| make, model | VIN, year, trim, mileage, condition, additions, junk fees, price |
+
+**Year drift:** the buyer picks make/model; model year may vary between dealerships. A `year_range` may bound the deal (roughly five years is the expected span), but this is a **soft guide, not a hard rejection** — buyers stay in a sensible range naturally, and a hard rule would block legitimate shopping.
+
+*Enforcement:* `target_vehicle.make`/`model` are write-once — settable while the deal is `draft`, immutable once any offer is attached. If the buyer enters a `VehicleInstance` whose make/model does not match the deal's anchor, the app **rejects the entry, highlights that vehicle in red against its VIN, and offers to open a new Deal.** The rejection is a receipt-trail event. VIN is **user-entered and unvalidated at launch** — it is the buyer's own record, not a lookup key (VIN decode validation is backlog).
+
+### Dealership data tenancy
+
+**Dealership names and locations are global; the people are private.** A `Dealership` record (name, state, city, zip) is shared across all accounts — one row per real dealership, so a directory can be batch-loaded later. `DealershipContact` records (the named general manager, sales manager, finance manager, sales agent, and their direct contact details) are **scoped to the account that entered them and are never exposed to another account.** One buyer's notes on which finance manager runs which play are that buyer's, not the platform's to redistribute.
 
 **Store:** Postgres for the relational core (deal → threads → messages → offers), object store (S3 or equiv.) for email attachments, uploaded documents, and generated dossiers. No audio is stored.
 

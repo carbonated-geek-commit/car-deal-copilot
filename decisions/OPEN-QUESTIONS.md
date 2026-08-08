@@ -97,3 +97,37 @@ The buyer writes notes and the extractor parses them (it is channel-agnostic, so
 ### Q15 — Private-party / marketplace comps
 **Context:** Corban asked for KBB private-party value plus Facebook Marketplace vehicles. Meta publishes no Marketplace API; automated scraping violates their ToS and carries legal and blocking risk.
 **ANSWER:** PENDING — KBB private-party is already covered by the existing mock-only KBB approval; the Marketplace sourcing method (user-pasted listings vs. licensed aggregator vs. other classifieds with real APIs) is still Corban's call. Blocks the valuation epic only.
+
+---
+
+## Corrections and additions — Corban, 2026-08-07 (second pass)
+
+### Q11 — AMENDED: the anchor is make/model, and the *reason* was recorded wrong
+**Correction (Corban):** the primary reason for one vehicle per deal is **not** bait-and-switch defence — it is that *one vehicle per deal is the only way to honestly show a customer whether they are getting a good deal.* Valuation, walk-away, and every flag are comparisons against a single known vehicle; a deal spanning two vehicles makes "is this a good price?" unanswerable. Bait-and-switch resistance is a **secondary benefit** the design supports, not its rationale. The spec's "Why the vehicle is immutable" section was rewritten accordingly.
+
+**Model correction:** the deal's immutable anchor is **make + model only**. Everything else varies per dealership:
+
+| Fixed for the deal | Varies per dealership thread |
+|---|---|
+| make, model | VIN, year, trim, mileage, condition, additions, junk fees, price |
+
+`VehicleSpec` is therefore split into `VehicleTarget` (deal-level: make, model, optional year_range) and `VehicleInstance` (thread-level: the specific car that dealership is offering). `Deal.resolved_vehicle` is removed — VIN belongs to the instance.
+
+### Q16 — VIN handling and mismatch
+**ANSWER:** — 2026-08-07. Swapping VIN within the same make/model is fine. Trim, mileage, and year may all differ between dealerships; a ~5-year span is the natural expectation and is a **soft guide, not a hard rejection**. VIN is **user-entered and unvalidated** at launch — the buyer's own record, not a lookup key. If a buyer enters a vehicle whose make/model does not match the deal anchor, the app **rejects it, highlights that vehicle in red against its VIN, and offers to open a new deal.** VIN decode validation is backlog.
+
+### Q17 — Concierge deliverable *(supersedes the gate's finding 9 escalation)*
+**ANSWER:** **Comparative, not forensic** — 2026-08-07. The concierge works several deals in parallel and presents the best one or few, with each deal's offer history behind it. The customer sees what else was on the table and why the recommendation won. This is a **trust relationship, not an evidence chain** — "either the customer trusts the concierge service or they don't." A transcript of a call the customer wasn't on is not obviously more useful than what the operator can type. Operator notes carry the `concierge` author label so self-authored text is never passed off as the dealer's. External call-artifact import (Zoom transcripts) is backlog.
+
+### Q12 — AMENDED: dealership data tenancy
+**ANSWER:** **Dealership names/locations are GLOBAL; named individuals are PRIVATE to the account** — 2026-08-07. `Dealership` (name, state, city, zip) is one shared row per real dealership, batch-loadable later. `DealershipContact` (general manager, sales manager, finance manager, sales agent, and their contact details) is scoped to the entering account and never exposed to another account.
+
+### Q15 — RESOLVED: private-party / marketplace comps
+**ANSWER:** **Buyer sources their own comps; the app recommends where to look** — 2026-08-07. No Facebook Marketplace integration: Meta publishes no API and scraping violates their terms. KBB private-party value still comes through the existing mock-only KBB approval. A licensed aggregator stays a future option. **Backlog.**
+
+### Q18 — Pre-deal phase (new backlog item)
+**ANSWER:** **Backlog** — 2026-08-07. A pre-deal onboarding phase for buyers who don't yet know which vehicle they want: compare candidates, build a portfolio on the account, then commit to one and open a Deal. Undecided buyers belong here, **not** inside a loosened deal system. Until it exists, an undecided buyer opens one deal per candidate. At deal creation the app explicitly explains why the deal locks to one vehicle.
+
+### Q19 — Does a second deal cost a second rail fee?
+**Context:** Deals are per-vehicle and entitlements gate per deal, so changing vehicle means a new deal. Corban's note — "I don't know why they're on a new deal" — means the system cannot distinguish a dealer's substitution from a buyer simply changing their mind, so a conditional waiver is not implementable.
+**ANSWER:** PENDING — **deferred to the billing epic**, which is post-private-beta. Not blocking E2–E7.

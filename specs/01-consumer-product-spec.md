@@ -77,14 +77,16 @@ Honest coaching card up front: most *local* dealers stall on price over email be
 ## Screen map
 
 ### 0. Onboarding & fork
-Credit consent + soft pull → target (make/model/trim *or* "scan on the lot") → budget → derived walk-away → the fork → coaching card.
+Credit consent + soft pull → target **make/model** (*or* "scan on the lot") → budget → derived walk-away → the fork → coaching card.
+
+**The one-vehicle explainer is part of onboarding, not fine print.** When the buyer commits to a make/model, the app says plainly *why* the deal locks to it: this is the only way we can honestly tell you whether a price is good, because every valuation and flag is a comparison against one known vehicle. Buyers who don't yet know what they want are served by the pre-deal phase (backlog, below) — not by loosening the deal.
 
 ### Web surface (war-room-first)
 
 | # | Screen | Purpose |
 |---|--------|---------|
 | W1 | **Dashboard** (Glovebox) | All active deals, budget, pre-qual loans, walk-away. |
-| W2 | **Deal War Room** | Core screen. One vehicle, **many dealerships side-by-side**: offer grid, packing/markup/junk-fee flags, walk-away tracker, and per-dealership **who you're working with** (agent → sales manager → finance manager) plus **process step** (information gather → deal negotiation → deal approval → financing → final sale → pickup). Entry is **notes-first** — the buyer types what was said and the extractor parses the offer out of it. **Burner inbox** (texts/emails threaded per dealership) lands post-beta. |
+| W2 | **Deal War Room** | Core screen. One make/model, **many dealerships side-by-side** — each column is one dealership's **specific car** (VIN, year, trim, mileage, add-ons) and its offer. Packing/markup/junk-fee flags, walk-away tracker, and per-dealership **who you're working with** (agent → sales manager → finance manager) plus **process step** (information gather → deal negotiation → deal approval → financing → final sale → pickup). Entry is **notes-first** — the buyer types what was said and the extractor parses the offer out of it. A vehicle entered against the wrong make/model is **rejected and shown in red against its VIN**, with a prompt to open a new deal. **Burner inbox** (texts/emails threaded per dealership) lands post-beta. |
 | W3 | **Compare & Fine-Print** | Side-by-side vehicles; TCO layer; contract line-item decoder. |
 | W4 | **Vault** | Saved cars, closed deals, ownership tracker — repair ledger + "keep or dump" month for a car you bought. |
 
@@ -112,7 +114,13 @@ Credit consent + soft pull → target (make/model/trim *or* "scan on the lot") �
 
 A human runs the **same deal war room** on the user's behalf, using the **same burner identity**. This is the "show the work" TikTok model, productized — the dossier *is* the deliverable.
 
-> **⚠ OPEN — escalated to Corban (gate verdict 2026-08-07-2, finding 9).** With transcription dropped (Q14), a concierge-run call produces **no independent artifact**: the record becomes the paid operator's own typed account of their own work. That is self-attestation at exactly the tier where the thesis names the receipt trail the deliverable. Text channels (SMS/email) are unaffected — those are captured verbatim. Pending decision: restore recording/transcription for the concierge rail only, restrict concierge to text channels, or accept operator-authored call notes with author labelling. Until resolved, no concierge implementation work may start. Explicitly **not** offered on B2B (that's a car-buyer-for-hire services business, deliberately out of scope).
+**What the customer is buying — resolved 2026-08-07.** The deliverable is **comparative, not forensic**: the concierge works **several deals in parallel** and presents the best one (or best few) with the full offer history behind each. The proof is that the customer can see what else was on the table and why the recommendation beat it.
+
+This is a **trust relationship, not an evidence chain.** Either the customer trusts the service or they don't; a verbatim transcript of a call the customer wasn't on does not change that, and it is not clear what a transcript would give the operator that they cannot enter themselves. Operator-authored notes carry the `concierge` author label (shared core `Message.author`), so nothing self-authored is ever presented as if the dealer said it.
+
+Explicitly **not** offered on B2B (that's a car-buyer-for-hire services business, deliberately out of scope).
+
+*Backlog:* importing external call artifacts (e.g. Zoom transcripts) into a deal — under consideration, not scoped.
 
 **Enforced agent controls** *(resolved 2026-08-07 — enforcement, not trust)*:
 1. **Role-scoped views** — the agent role sees the prequal summary only (qualified rate, budget); credit detail is absent from the agent API surface.
@@ -127,3 +135,16 @@ A human runs the **same deal war room** on the user's behalf, using the **same b
 ## Resolved decisions (v0.2)
 
 All four v0.1 open decisions were resolved in the 2026-08-07 architect interview and are folded into the sections above (consent posture, number lifecycle, credit residency, concierge controls). Full answers with rationale: `decisions/OPEN-QUESTIONS.md` Q1–Q4 and Q9.
+
+---
+
+## Backlog (explicitly out of current scope)
+
+Recorded so they are not silently forgotten, and not planned until promoted.
+
+1. **Pre-deal phase — vehicle shortlist.** Onboarding for a buyer who does not yet know which vehicle they want: compare several candidates, build a portfolio on the account, then commit to one and open a Deal. This is where "I'm not sure yet" belongs — *not* inside the deal system, whose honesty depends on a single anchor vehicle. Until this exists, undecided buyers open one deal per candidate.
+2. **External call-artifact import** (e.g. Zoom transcripts) attached to a deal. Under consideration; the open question is what a transcript gives the buyer that they cannot type themselves.
+3. **Call transcription / ASR.** Dropped from launch (Q14). Reviving it re-opens the two-party-consent question and needs an approved provider.
+4. **VIN decode validation.** At launch VIN is user-entered and unvalidated — the buyer's own record. A decode lookup would let the app verify make/model against the VIN rather than trusting entry.
+5. **Dealership directory batch load.** Dealership records are user-entered at launch; the schema accepts a bulk import later. No Maps/business API is approved (Q13).
+6. **Facebook Marketplace and other private-party comps.** Meta publishes no Marketplace API and scraping violates their terms, so at launch **the buyer sources their own comps and the app points them at good marketplaces to look.** A licensed aggregator remains a future option.
