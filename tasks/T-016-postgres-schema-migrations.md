@@ -1,8 +1,8 @@
 ---
 id: T-016
 title: Postgres schema + migrations for the v0.5 relational core (tenancy split, append-only receipt)
-stage: build
-owner_agent: designer
+stage: test
+owner_agent: builder
 status: in_progress
 depends_on: [T-010, T-015]
 file_ownership:
@@ -60,3 +60,4 @@ mock_only: false
 <!-- append-only; one line per event: YYYY-MM-DD HH:MM · agent · event -->
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
 2026-08-07 15:30 · designer · design complete → docs/design/T-016.md (composite-FK tenancy, 3-layer append-only receipt, target-by-arity); stage → build
+undefined · builder · build complete → 14 forward-only migrations + @db (config/errors/pool/migrate/schema); typecheck green; no live Postgres available here, so the DDL is unexecuted — tester must run it; stage → test
