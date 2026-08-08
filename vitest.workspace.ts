@@ -37,6 +37,12 @@ export default defineWorkspace([
         'packages/**/test/**/*.test.ts',
         'services/**/src/**/*.test.ts',
         'services/**/test/**/*.test.ts',
+        // T-015 tester: root-level tests for root-level artifacts (workspace
+        // registration, the alias map, the dependency set, the lockfile). T-015 owns
+        // root config but no workspace member of its own, and design §1.2 forbids it
+        // from creating test/ inside packages/db|store-pg|object-store or services/api
+        // (those subtrees belong to T-016..T-019). Additive: collides with nothing.
+        'test/**/*.test.ts',
       ],
       environment: 'node',
     },
