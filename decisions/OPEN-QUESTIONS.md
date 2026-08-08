@@ -131,3 +131,17 @@ The buyer writes notes and the extractor parses them (it is channel-agnostic, so
 ### Q19 — Does a second deal cost a second rail fee?
 **Context:** Deals are per-vehicle and entitlements gate per deal, so changing vehicle means a new deal. Corban's note — "I don't know why they're on a new deal" — means the system cannot distinguish a dealer's substitution from a buyer simply changing their mind, so a conditional waiver is not implementable.
 **ANSWER:** PENDING — **deferred to the billing epic**, which is post-private-beta. Not blocking E2–E7.
+
+### Q20 — Deal-level walk-away vs per-instance valuation *(gate verdict -3, findings 2–4)*
+**Context:** v0.4 fixed only make+model at the deal level, but make+model is not priceable — year, trim, mileage, and condition all vary per thread, and `walk_away_number` sits on the Deal. The gate ruled this weakens consumer red line 1 because the incomparability the one-vehicle rule prevents reappears one level down.
+**Chief's recommendation:** separate the two jobs the number is doing. `Deal.walk_away_number` = the buyer's **budget ceiling** (deal-level, `over_walkaway` unchanged). **"Is this a good deal?"** = **per-instance**, judged against that `VehicleInstance`'s own `ValuationSnapshot`. Cross-thread comparison becomes value-adjusted rather than raw-price.
+**ANSWER:** PENDING — Corban. Blocks valuation and flag work beyond Epic 1.
+
+### Q21 — Concierge evidentiary residue *(gate verdict -3, findings 5–7)*
+**Context:** The gate accepts that the **winning** deal is independently checkable (the customer signs the dealership's own contract) but holds that the **losing** threads' offer histories — the very thing justifying "this beat the alternatives" — are operator-authored and uncheckable, so red line 7's trust-engine clause is weakened at this tier.
+**Corban's position (recorded twice):** comparative not forensic; "either the customer trusts the concierge service or they don't." Mitigations in place: `Message.author` labelling and customer-only signing authority.
+**ANSWER:** PENDING — Corban to either accept this as a recorded, deliberate risk (which closes it) or add a verification mechanism. Blocks concierge implementation only; nothing on the critical path.
+
+### Q22 — Ratify the `Message` shape
+**Context:** specs/00 carries `Message` marked "chief-proposed, awaiting ratification" (channel += `note`, `direction` += `internal`, new `author`, new `call_meta`), while specs/01's concierge honesty guarantee and the whole note-capture path already depend on it.
+**ANSWER:** PENDING — Corban to ratify or amend. Low risk; it follows directly from Q14.

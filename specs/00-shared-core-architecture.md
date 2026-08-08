@@ -81,7 +81,15 @@ Offer
 ├── sale_price, fees[], apr, term_months, monthly
 └── flags[]   (packing | rate_markup | junk_fee | over_walkaway)
 
-ValuationSnapshot · VehicleData   (cached, timestamped)
+ValuationSnapshot           (ALWAYS of one specific car — never of a bare make/model)
+├── vehicle_instance_id     (→ VehicleInstance)
+├── wholesale, trade_in, retail, private_party
+└── source, captured_at
+
+VehicleData                 (decode, recalls, history for one specific car)
+├── vehicle_instance_id     (→ VehicleInstance)
+├── recalls[], history?, reliability?
+└── captured_at
 ```
 
 ### Cardinality invariants (structurally enforced)
@@ -101,6 +109,14 @@ ValuationSnapshot · VehicleData   (cached, timestamped)
 | make, model | VIN, year, trim, mileage, condition, additions, junk fees, price |
 
 **Year drift:** the buyer picks make/model; model year may vary between dealerships. A `year_range` may bound the deal (roughly five years is the expected span), but this is a **soft guide, not a hard rejection** — buyers stay in a sensible range naturally, and a hard rule would block legitimate shopping.
+
+> **⚠ OPEN — escalated to Corban (gate verdict 2026-08-07-3, findings 2–4).** "Make + model" alone is not a priceable entity: no valuation source can price *Honda Accord* without year, trim, mileage, and condition — and all four now vary per thread. Yet `walk_away_number` sits on the **Deal**, so one figure would be applied across cars that may differ by five model years, any trim, any mileage, and new vs. used vs. certified. The gate's charge is that this reproduces the exact incomparability the one-vehicle rule exists to prevent, one level down.
+>
+> **Chief's recommended resolution (needs Corban's yes/no):** split the two questions the number is currently doing double duty for.
+> - `Deal.walk_away_number` = **the buyer's budget ceiling** — "I will not spend more than $X." Legitimately deal-level, applies to every thread, and keeps `over_walkaway` exactly as built.
+> - **"Is this a good deal?"** = a **per-instance** verdict: each `VehicleInstance` carries its own `ValuationSnapshot`, and fair-price is judged against *that car's* value, not the deal's.
+>
+> Under this split the honesty promise holds — every verdict is still a comparison against one known car — and cross-thread comparison becomes *value-adjusted* rather than raw-price. Until this is settled, no valuation or flag work beyond what Epic 1 already shipped should proceed.
 
 *Enforcement:* `target_vehicle.make`/`model` are write-once — settable while the deal is `draft`, immutable once any offer is attached. If the buyer enters a `VehicleInstance` whose make/model does not match the deal's anchor, the app **rejects the entry, highlights that vehicle in red against its VIN, and offers to open a new Deal.** The rejection is a receipt-trail event. VIN is **user-entered and unvalidated at launch** — it is the buyer's own record, not a lookup key (VIN decode validation is backlog).
 

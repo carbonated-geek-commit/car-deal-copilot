@@ -51,7 +51,7 @@ Threading/capture/extraction is the shared aggregation layer. What's consumer-sp
 
 The buyer types what the dealer said, in their own words, and the offer extractor parses the terms out of that text — the extractor is channel-agnostic, so a typed note works exactly like any other message. Consequences:
 
-- `Message.recording_url` stays null by policy; no audio is ever captured or stored.
+- There is no `recording_url` field on `Message` at all — no audio is ever captured or stored, so the field was removed rather than left null (shared core v0.4).
 - No ASR/transcription provider is required, so none is approved or wired.
 - Legal exposure from two-party-consent states is **avoided entirely** rather than managed — there is nothing to consent to.
 - The receipt trail carries buyer-authored notes with timestamps. They are weaker evidence than a recording, and that trade is accepted.
