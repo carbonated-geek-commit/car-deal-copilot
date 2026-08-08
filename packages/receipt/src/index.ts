@@ -5,12 +5,18 @@
  *
  * The exported store contract is structurally append-only: append and read
  * are the ONLY operations on ReceiptStore — no update, delete, overwrite,
- * or truncate exists anywhere on this surface (task AC-2).
+ * or truncate exists anywhere on this surface (T-012 AC-8).
+ *
+ * Every exported entry type carries a REQUIRED `author` (AC-6), and the entry
+ * kinds are exactly note | sms | email | call_meta (AC-5) — the audio- and
+ * verbatim-call-text kinds are gone from the surface, not deprecated on it.
  */
 
 export type {
   AppendOutcome,
+  CallMetaEntryInput,
   EmailEntryInput,
+  NoteEntryInput,
   ReceiptClock,
   ReceiptEntry,
   ReceiptEntryInput,
@@ -20,9 +26,7 @@ export type {
   ReceiptErrorCode,
   ReceiptResult,
   ReceiptStore,
-  RecordingRefEntryInput,
   SmsEntryInput,
-  TranscriptEntryInput,
 } from './contract.js';
 
 export { createInMemoryReceiptStore } from './memory-store.js';

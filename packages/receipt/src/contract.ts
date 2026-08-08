@@ -1,63 +1,117 @@
 /**
- * Receipt-layer contract (docs/design/T-008.md §2–§3).
+ * Receipt-layer contract (docs/design/T-012.md §2; supersedes T-008 §2–§3).
  *
- * specs/00-shared-core-architecture.md "Receipt layer (trust engine)":
- * every recording, transcript, SMS, email is append-only, timestamped,
- * exportable. The store interface below is STRUCTURALLY append-only —
- * it exposes append and read only; no update, delete, overwrite, or
- * truncate operation exists on any exported type (task AC-2).
+ * specs/00-shared-core-architecture.md "Receipt layer (trust engine)": every
+ * buyer note, SMS, email, and call-metadata record is append-only, timestamped,
+ * exportable — and "each entry carries its author — buyer, concierge operator,
+ * or dealer — so self-authored evidence is never presented as if it came from
+ * the dealer". No audio and no verbatim call text exist anywhere in the v0.5
+ * product (specs/01 consent posture, resolved 2026-08-07; Q14), so the kinds
+ * that pointed at them were deleted rather than deprecated (D4).
  *
- * All shared types are imported from `@core` (T-001 D3); this module
- * defines only receipt-package-local projections (design R1) and never
- * redefines `Deal`, `Message`, or any core scalar/enum.
+ * The store interface below is STRUCTURALLY append-only — it exposes append
+ * and read only; no update, delete, overwrite, or truncate operation exists on
+ * any exported type (AC-8).
+ *
+ * All shared types are imported from `@core` (ADR-001); this module defines
+ * only receipt-package-local projections and never redefines `Deal`,
+ * `Message`, `CallMeta`, or any core scalar/enum. Narrowings use
+ * `Exclude<…>` over the spine type rather than new literal unions.
  */
-import type { IsoTimestamp, MessageChannel, MessageDirection } from '@core';
+import type {
+  CallMeta,
+  IsoTimestamp,
+  MessageAuthor,
+  MessageChannel,
+  MessageDirection,
+} from '@core';
 
-/** specs/00 "Receipt layer": recording, transcript, SMS, email — closed set (R2). */
-export type ReceiptEntryKind = 'recording_ref' | 'transcript' | 'sms' | 'email';
+/**
+ * specs/00 "Receipt layer": buyer note, SMS, email, call-metadata record —
+ * closed set (D4). The two v0.4 kinds that pointed at captured audio and at
+ * verbatim call text are DELETED: not deprecated, not aliased. T-010 deleted
+ * the corresponding spine fields with no shim; a shim here would re-open what
+ * core closed.
+ */
+export type ReceiptEntryKind = 'note' | 'sms' | 'email' | 'call_meta';
 
 interface ReceiptEntryInputBase {
   kind: ReceiptEntryKind;
+  /**
+   * Who produced this entry. REQUIRED — never inferred, never defaulted,
+   * never derived from `kind`, `direction`, or provider metadata (D5).
+   * specs/00 "Receipt layer"; `@core` `Message.author` (Q22). A default would
+   * be an inference wearing a different hat, and the one failure mode this
+   * field exists to prevent is self-authored evidence acquiring a `dealer`
+   * label by omission.
+   */
+  author: MessageAuthor;
   direction: MessageDirection;
   /** When the underlying communication happened (maps to Message.timestamp). */
   occurred_at: IsoTimestamp;
-  /** Correlation to the originating message/event — the spine's existing anchor (R1). */
-  provider_message_ref?: string;
-  /** Idempotency anchor for at-least-once writers (R6). Convention: event idempotency_key. */
+  /** Idempotency anchor for at-least-once writers. Convention: event idempotency_key. */
   dedupe_key?: string;
 }
 
 /**
- * A POINTER to a recording (provider handle or future object-store key) —
- * never audio bytes. Consumer product policy (specs/01 transcribe-only)
- * simply never appends this kind; the kind exists because the layer is shared.
+ * Arrived through a provider — so it has a provider correlation id and a real
+ * direction. `internal` is excluded: an internal record is the account side's
+ * own, and it never came off a provider wire (D9).
  */
-export interface RecordingRefEntryInput extends ReceiptEntryInputBase {
-  kind: 'recording_ref';
-  recording_ref: string;
+interface ProviderOriginatedEntryInputBase extends ReceiptEntryInputBase {
+  direction: Exclude<MessageDirection, 'internal'>;
+  provider_message_ref?: string;
 }
 
-export interface TranscriptEntryInput extends ReceiptEntryInputBase {
-  kind: 'transcript';
-  transcript: string;
+/**
+ * The buyer's or operator's own written record (`@core`: "`note` = text the
+ * buyer/operator authored"; "`internal` = the buyer's/operator's own record").
+ * A dealer-authored note contradicts that gloss, so it is unrepresentable
+ * rather than merely rejected (D6). No `provider_message_ref`: a note has no
+ * provider id, and offering the field would invite fabricated provenance in
+ * the one structure whose value is that it is not fabricated (D9).
+ */
+export interface NoteEntryInput extends ReceiptEntryInputBase {
+  kind: 'note';
+  direction: 'internal';
+  author: Exclude<MessageAuthor, 'dealer'>;
+  body: string;
 }
 
-export interface SmsEntryInput extends ReceiptEntryInputBase {
+export interface SmsEntryInput extends ProviderOriginatedEntryInputBase {
   kind: 'sms';
   body: string;
 }
 
-export interface EmailEntryInput extends ReceiptEntryInputBase {
+export interface EmailEntryInput extends ProviderOriginatedEntryInputBase {
   kind: 'email';
   subject?: string;
   body: string;
 }
 
+/**
+ * Call METADATA only — time, direction, party (specs/00 "Comms aggregation
+ * layer": "log call metadata (time, direction, party) on DealerThread").
+ * `CallMeta` is the `@core` type reused verbatim (ADR-001, D8), and it has no
+ * field where an audio pointer or a verbatim call text could sit — AC-7 is a
+ * property of the TYPE, not a rule someone has to remember. There is
+ * deliberately no `body` here either.
+ *
+ * `author` = who logged this call on the account side, not who spoke (D7);
+ * `direction` already carries who called whom. A dealer never writes into this
+ * trail, so `dealer` is unrepresentable.
+ */
+export interface CallMetaEntryInput extends ProviderOriginatedEntryInputBase {
+  kind: 'call_meta';
+  author: Exclude<MessageAuthor, 'dealer'>;
+  call_meta: CallMeta;
+}
+
 export type ReceiptEntryInput =
-  | RecordingRefEntryInput
-  | TranscriptEntryInput
+  | NoteEntryInput
   | SmsEntryInput
-  | EmailEntryInput;
+  | EmailEntryInput
+  | CallMetaEntryInput;
 
 /** Store-assigned at append time; never caller-supplied. */
 export interface ReceiptEntryStamp {
@@ -65,7 +119,7 @@ export interface ReceiptEntryStamp {
   seq: number;
   /** When the store accepted the entry (distinct from occurred_at). */
   appended_at: IsoTimestamp;
-  /** Derived from kind (R4): recording_ref/transcript → 'call', sms → 'sms', email → 'email'. */
+  /** Derived from kind — a bijection under v0.5 (see memory-store CHANNEL_BY_KIND). */
   channel: MessageChannel;
 }
 
@@ -78,15 +132,19 @@ export interface ReceiptEntryStamp {
 export type ReceiptEntry = Readonly<ReceiptEntryInput & ReceiptEntryStamp>;
 
 export type ReceiptErrorCode =
-  | 'invalid_input' // caller bug (empty bundle id, empty payload) — not retryable
+  | 'invalid_input' // caller bug (blank bundle id, missing author, empty payload) — not retryable
   | 'store_unavailable' // durable-backend outage — retryable; in-memory impl never emits it
-  | 'not_implemented'; // Epic 1 stubs (renderPdf, publishWebLink) — not retryable
+  | 'not_implemented'; // dossier render/publish stubs — not retryable
 
 export interface ReceiptError {
   code: ReceiptErrorCode;
   /** True only for store_unavailable. Stated explicitly so callers never guess. */
   retryable: boolean;
-  /** Log-safe: never contains bodies, transcripts, phone numbers, or email addresses. */
+  /**
+   * Log-safe by contract: never contains note/sms/email bodies, email
+   * subjects, `call_meta.party`, phone numbers, or email addresses. Codes,
+   * entry kinds, author labels (an enum), and field names only.
+   */
   message: string;
 }
 
@@ -94,19 +152,20 @@ export type ReceiptResult<T> = { ok: true; value: T } | { ok: false; error: Rece
 
 export interface AppendOutcome {
   entry: ReceiptEntry;
-  /** True when dedupe_key matched an existing entry and no new entry was written (R6). */
+  /** True when dedupe_key matched an existing entry and nothing new was written (D10). */
   deduplicated: boolean;
 }
 
 /**
  * Append-only, timestamped store for receipt entries, keyed by the Deal's
- * receipt_bundle_id (specs/00 "Core domain model"). specs/00 "Receipt layer":
- * append-only, timestamped, exportable. Epic 1 ships the in-memory reference;
- * a Postgres/S3 implementation must satisfy THIS interface unchanged (R7).
+ * receipt_bundle_id (specs/00 "Core domain model"; AC-10). These TWO methods
+ * are the entire surface: no update, delete, overwrite, truncate, upsert, or
+ * patch operation exists on this or any exported type — and none may be added.
+ * A Postgres/S3 implementation (T-017) must satisfy THIS interface unchanged.
  */
 export interface ReceiptStore {
   append(receipt_bundle_id: string, input: ReceiptEntryInput): Promise<ReceiptResult<AppendOutcome>>;
-  /** Chronological read-back: occurred_at ascending, ties broken by seq (R5). */
+  /** Chronological read-back: occurred_at ascending, ties broken by seq. */
   read(receipt_bundle_id: string): Promise<ReceiptResult<readonly ReceiptEntry[]>>;
 }
 
