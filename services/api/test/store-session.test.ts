@@ -133,17 +133,54 @@ describe('runWithSession — open, run, commit; rollback on failure', () => {
   });
 
   /**
-   * The stated boundary of "never throws": `commit()` is contractually a
-   * `Promise<ApiResult<void>>`, so a session whose commit REJECTS has already
-   * broken its own contract. `runWithSession` does not catch that, and no
-   * rollback runs for it. Harmless in memory mode (commit is a no-op); recorded
-   * here so T-017's Postgres session is written to return failures rather than
-   * to reject, and so the gap is visible if it ever changes.
+   * "Never throws; failures are values" has to hold for a session that breaks
+   * its OWN contract, or the contract is only as strong as the implementation
+   * behind it. `commit()` is typed `Promise<ApiResult<void>>`, but one that
+   * REJECTS instead must still leave `withDeal` returning an `ApiResult` — and
+   * must still roll back, or the transaction is neither committed nor undone.
+   * This is the seam T-017's `PgCommsSession` plugs into.
    */
-  it('propagates a commit that breaks the ApiResult contract, and does not roll back', async () => {
+  it('turns a commit that REJECTS into a failure value, and still rolls back', async () => {
     const { session, log } = fakeSession({ commit: () => Promise.reject(new Error('commit exploded')) });
-    await expect(runWithSession(session, () => Promise.resolve(1))).rejects.toThrow('commit exploded');
-    expect(log).toEqual([]);
+    const result = await runWithSession(session, () => Promise.resolve(1));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('internal');
+      // The thrown text rides `cause` and never the wire.
+      expect(result.error.message).toBe('internal error');
+    }
+    expect(log).toEqual(['rollback']);
+  });
+
+  it('preserves an ApiError carried by a rejecting commit', async () => {
+    const { session } = fakeSession({
+      commit: () =>
+        Promise.reject(Object.assign(new Error('down'), { api_error: apiError('unavailable', 'store unavailable') })),
+    });
+    const result = await runWithSession(session, () => Promise.resolve(1));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unavailable');
+  });
+
+  /**
+   * A cleanup failure must not replace the failure that caused it: the caller
+   * needs the ORIGINAL reason, and every exit stays a value.
+   */
+  it('does not let a rejecting rollback escape, or mask the original failure', async () => {
+    const { session } = fakeSession({
+      rollback: () => Promise.reject(new Error('rollback exploded')),
+      commit: () => Promise.resolve({ ok: false, error: apiError('conflict', 'already set') }),
+    });
+    const result = await runWithSession(session, () => Promise.resolve(1));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('conflict');
+
+    const onCallbackFailure = await runWithSession(
+      fakeSession({ rollback: () => Promise.reject(new Error('rollback exploded')) }).session,
+      () => Promise.reject(Object.assign(new Error('nope'), { api_error: apiError('not_found', 'gone') })),
+    );
+    expect(onCallbackFailure.ok).toBe(false);
+    if (!onCallbackFailure.ok) expect(onCallbackFailure.error.code).toBe('not_found');
   });
 
   it('reports an unopenable session as retryable 503', () => {

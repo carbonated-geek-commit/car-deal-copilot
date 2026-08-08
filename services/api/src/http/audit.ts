@@ -1,9 +1,15 @@
 /**
  * The boot-time route audit (docs/design/T-019.md §2.10, D2; AC-3, AC-5, §5.8).
  *
- * Registered as an `onRoute` hook, so it fires at REGISTRATION time. A finding
- * aborts startup — the process never listens — rather than surfacing later as a
- * runtime hole in one endpoint nobody exercised.
+ * Registered as an `onRoute` hook, so it fires at REGISTRATION time and every
+ * finding is known before `ready()` resolves. A finding aborts startup — the
+ * process never listens — rather than surfacing later as a runtime hole in one
+ * endpoint nobody exercised.
+ *
+ * The hook records; it does not throw. `buildServer` reads the table after
+ * `ready()` and turns a non-empty one into `fail(...)`. See `installRouteAudit`
+ * for why throwing out of `onRoute` made the guarantee depend on the syntax of
+ * the plugin that registered the route.
  *
  * This is what makes AC-3 and AC-5 keep holding after T-020 adds routes under
  * `src/routes/**`, a subtree this task does not own and must not edit. The
@@ -82,9 +88,9 @@ export function auditRoute(route: {
 }
 
 /**
- * Thrown out of `onRoute`, which means out of `register`, which means out of
- * `app.ready()` — so `buildServer` reports it as a failed startup rather than
- * a server that came up with a hole in it.
+ * The finding, as an error VALUE. `buildServer` raises it AFTER `ready()` from
+ * the recorded table (see `installRouteAudit`), so it always reaches the
+ * caller as `fail(...)` rather than as an uncaught exception.
  */
 export class RouteAuditError extends Error {
   readonly findings: readonly RouteAuditFinding[];
@@ -103,9 +109,24 @@ export class RouteAuditError extends Error {
 const AUDIT_STORE = Symbol.for('deal-copilot.api.route-audit');
 
 /**
- * Installs the hook. Findings are recorded on the instance BEFORE the throw so
- * `auditRouteTable` can report them, and so a test can read the exact finding
- * rather than pattern-matching an error message.
+ * Installs the hook. The hook RECORDS and never throws — that is the whole
+ * contract, and it is a correctness requirement rather than a style choice.
+ *
+ * avvio invokes a plugin function with no try/catch (`avvio/lib/plugin.js`
+ * `Plugin.exec`: `const maybePromiseLike = func(this.server, this.options,
+ * done)`). A `FastifyPluginAsync` written as a NON-async function that returns
+ * a promise — the style of this service's own `healthPlugin` and
+ * `webhookPlugin`, and legal for any route plugin T-020 writes — would
+ * therefore throw SYNCHRONOUSLY out of `onRoute`, escape avvio before the
+ * returned promise exists, and leave the boot promise forever unsettled: the process
+ * hangs or dies on an uncaught exception instead of reporting the finding.
+ *
+ * A boot audit whose guarantee depends on the syntax a route plugin happens to
+ * use is not a guarantee. So findings accumulate on the instance and
+ * `buildServer` reads `auditRouteTable(app)` after `ready()`. Registration is
+ * allowed to complete — nothing LISTENS until `buildServer` returns `ok`, so
+ * the offending route is never reachable — and the abort names EVERY finding
+ * rather than only the first route that tripped.
  */
 export function installRouteAudit(app: FastifyInstance): void {
   const store: RouteAuditFinding[] = [];
@@ -120,7 +141,6 @@ export function installRouteAudit(app: FastifyInstance): void {
     });
     if (findings.length === 0) return;
     store.push(...findings);
-    throw new RouteAuditError(findings);
   });
 }
 

@@ -60,7 +60,7 @@ import {
 import { MESSAGE_BY_CODE, fromFrameworkError } from '../errors/mapping.js';
 import { assertResponseSafe } from '../projection/guards.js';
 import { webhookPlugin } from '../webhooks/plugin.js';
-import { RouteAuditError, installRouteAudit } from './audit.js';
+import { RouteAuditError, auditRouteTable, installRouteAudit } from './audit.js';
 import { healthPlugin } from './health.js';
 import { REDACTED_LOG_PATHS, logSerializers, type ApiLogger } from './request-log.js';
 
@@ -160,8 +160,6 @@ export async function buildServer(options: ServerOptions): Promise<ApiResult<Fas
 
   try {
     // ---- three scopes; what is ABSENT from each is the point -------------
-    // Registration is inside the try because `await register(...)` resolves
-    // through `ready()`, so a route-audit throw surfaces HERE, not later.
     await app.register(healthPlugin({ container, resolver }));
     await app.register(webhookPlugin({ intake: container.comms.intake }));
 
@@ -178,6 +176,15 @@ export async function buildServer(options: ServerOptions): Promise<ApiResult<Fas
     });
 
     await app.ready();
+
+    // The boot audit is read HERE, not raised from its hook. `onRoute` runs
+    // inside the plugin function avvio calls without a try/catch, so a throw
+    // from it escapes synchronously for a non-async plugin and the boot promise
+    // never settles (see http/audit.ts). Reading the recorded table after
+    // `ready()` makes the abort a value for EVERY legal plugin style, and
+    // reports every finding rather than only the first route that tripped.
+    const findings = auditRouteTable(app);
+    if (findings.length > 0) throw new RouteAuditError(findings);
   } catch (cause) {
     if (cause instanceof RouteAuditError) {
       options.log?.({

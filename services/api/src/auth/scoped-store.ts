@@ -168,15 +168,44 @@ export async function runWithSession<T>(
   try {
     value = await fn(session);
   } catch (cause) {
-    await session.rollback();
+    await rollbackQuietly(session);
     return fail(unwrap(cause));
   }
-  const committed = await session.commit();
+
+  // `commit()` is contractually `Promise<ApiResult<void>>`, but a session that
+  // REJECTS instead of returning a failure would otherwise escape `withDeal` as
+  // a rejected promise — breaking this module's stated "never throws; failures
+  // are values" contract every handler relies on — and skip the rollback below,
+  // leaving the transaction neither committed nor rolled back. This is the exact
+  // seam T-017's Postgres session plugs into, so it is guarded rather than
+  // assumed.
+  let committed: ApiResult<void>;
+  try {
+    committed = await session.commit();
+  } catch (cause) {
+    await rollbackQuietly(session);
+    return fail(unwrap(cause));
+  }
+
   if (!committed.ok) {
-    await session.rollback();
+    await rollbackQuietly(session);
     return fail(committed.error);
   }
   return ok(value);
+}
+
+/**
+ * A `rollback()` that itself rejects must not replace the failure that caused
+ * it: the transaction is lost either way, and the caller needs the ORIGINAL
+ * reason, not the cleanup's. Swallowing here is what keeps every `runWithSession`
+ * exit a value.
+ */
+async function rollbackQuietly(session: StoreSession): Promise<void> {
+  try {
+    await session.rollback();
+  } catch {
+    /* deliberately ignored — see above */
+  }
 }
 
 const unwrap = (cause: unknown): ApiError => {
