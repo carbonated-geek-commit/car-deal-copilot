@@ -1,8 +1,8 @@
 ---
 id: T-016
 title: Postgres schema + migrations for the v0.5 relational core (tenancy split, append-only receipt)
-stage: test
-owner_agent: builder
+stage: validate
+owner_agent: tester
 status: in_progress
 depends_on: [T-010, T-015]
 file_ownership:
@@ -61,3 +61,4 @@ mock_only: false
 2026-08-07 14:00 · planner · task created (Epic 2 Half B: persistence & API spine)
 2026-08-07 15:30 · designer · design complete → docs/design/T-016.md (composite-FK tenancy, 3-layer append-only receipt, target-by-arity); stage → build
 undefined · builder · build complete → 14 forward-only migrations + @db (config/errors/pool/migrate/schema); typecheck green; no live Postgres available here, so the DDL is unexecuted — tester must run it; stage → test
+undefined · tester · 171 tests across 5 files (131 always-on, 40 DATABASE_URL-gated and SKIPPED — no Postgres here, ADR-008); 2 FAIL: messages_thread_fk and offers_thread_fk omit deal_id, so a message/offer can name one deal while pointing at a thread of another (dealer_threads_account_deal_id_uk exists for exactly this and is referenced by nothing); stage → validate
